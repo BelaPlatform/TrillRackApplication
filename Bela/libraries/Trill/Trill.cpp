@@ -55,7 +55,11 @@ struct TrillDefaults
 };
 
 const float defaultThreshold = 0x28 / 4096.f;
-static const std::map<Trill::Device, struct TrillDefaults> trillDefaults = {
+struct TrillDefaultsMap {
+	Trill::Device device;
+	struct TrillDefaults defaults;
+};
+static const std::array<struct TrillDefaultsMap, 8> trillDefaults = {{
 	{Trill::NONE, TrillDefaults("No device", Trill::AUTO, 0, 0xFF, -1)},
 	{Trill::UNKNOWN, TrillDefaults("Unknown device", Trill::AUTO, 0, 0xFF, -1)},
 	{Trill::BAR, TrillDefaults("Bar", Trill::CENTROID, defaultThreshold, 0x20, 2)},
@@ -64,7 +68,7 @@ static const std::map<Trill::Device, struct TrillDefaults> trillDefaults = {
 	{Trill::RING, TrillDefaults("Ring", Trill::CENTROID, defaultThreshold, 0x38, 2)},
 	{Trill::HEX, TrillDefaults("Hex", Trill::CENTROID, defaultThreshold, 0x40, 1)},
 	{Trill::FLEX, TrillDefaults("Flex", Trill::CENTROID, 0.03, 0x48, 4)},
-};
+}};
 
 static const std::map<Trill::Mode, std::string> trillModes = {
 	{Trill::AUTO, "Auto"},
@@ -96,14 +100,37 @@ Trill::Trill(unsigned int i2c_bus, Device device, uint8_t i2c_address) {
 	setup(i2c_bus, device, i2c_address);
 }
 
+static bool defaultsExistFor(Trill::Device device)
+{
+	for(auto& d : trillDefaults)
+		if(d.device == device)
+	return true;
+	return false;
+}
+
+static const TrillDefaults& getDefaultsFor(const Trill::Device device)
+{
+	ssize_t idx = -1;
+	for(size_t n = 0; n < trillDefaults.size(); ++n)
+	{
+		if(device == trillDefaults[n].device)
+		{
+			idx = n;
+			break;
+		}
+	}
+	if(idx < 0)
+		return getDefaultsFor(Trill::NONE);
+	return trillDefaults[idx].defaults;
+}
+
 int Trill::setup(unsigned int i2c_bus, Device device, uint8_t i2c_address)
 {
 	dataBuffer.resize(kRawLength);
 	rawData.resize(kNumChannelsMax);
 	address = 0;
 	device_type_ = NONE;
-	TrillDefaults defaults = trillDefaults.at(device);
-
+	TrillDefaults defaults = getDefaultsFor(device);
 	if(128 <= i2c_address)
 		i2c_address = defaults.address;
 
@@ -125,14 +152,14 @@ int Trill::setup(unsigned int i2c_bus, Device device, uint8_t i2c_address)
 		fprintf(stderr, "Wrong device type detected. `%s` was requested "
 				"but `%s` was detected on bus %d at address %#x(%d).\n",
 				defaults.name.c_str(),
-				trillDefaults.at(device_type_).name.c_str(),
+				getDefaultsFor(device_type_).name.c_str(),
 				i2c_bus, i2c_address, i2c_address
 		       );
 		device_type_ = NONE;
 		return -3;
 	}
 	// if the device was unknown it will have changed by now
-	defaults = trillDefaults.at(device_type_);
+	defaults = getDefaultsFor(device_type_);
 
 	Mode mode = defaults.mode;
 	if(setMode(mode) != 0) {
@@ -194,9 +221,9 @@ Trill::~Trill() {
 const std::string& Trill::getNameFromDevice(Device device)
 {
 	__try {
-		return trillDefaults.at(device).name;
+		return getDefaultsFor(device).name;
 	} __catch (std::exception e) {
-		return trillDefaults.at(Device::UNKNOWN).name;
+		return getDefaultsFor(Device::UNKNOWN).name;
 	}
 }
 
@@ -219,8 +246,8 @@ Trill::Device Trill::getDeviceFromName(const std::string& name)
 {
 	for(auto& td : trillDefaults)
 	{
-		Device device = td.first;
-		const std::string& str2 = trillDefaults.at(device).name;
+		Device device = td.device;
+		const std::string& str2 = getDefaultsFor(device).name;
 		if(strCmpIns(name, str2))
 			return Device(device);
 	}
@@ -276,7 +303,7 @@ int Trill::identify() {
 	}
 	Device readDeviceType = (Device)dataBuffer[1];
 	// if we do not recognize the device type, we also return an error
-	if(trillDefaults.find(readDeviceType) == trillDefaults.end()) {
+	if(!defaultsExistFor(readDeviceType)) {
 		device_type_ = NONE;
 		return -1;
 	}
@@ -305,7 +332,7 @@ void Trill::printDetails()
 int Trill::setMode(Mode mode) {
 	ssize_t bytesToWrite = 3;
 	if(AUTO == mode)
-		mode = trillDefaults.at(device_type_).mode;
+		mode = getDefaultsFor(device_type_).mode;
 	char buf[3] = { kOffsetCommand, kCommandMode, (char)mode };
 	if(int writtenValue = (writeBytes(buf, bytesToWrite)) != bytesToWrite)
 	{
