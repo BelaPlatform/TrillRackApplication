@@ -1,0 +1,3 @@
+[submodule "trill-neopixel"]
+	path = trill-neopixel
+	url = ./trill-neopixel
