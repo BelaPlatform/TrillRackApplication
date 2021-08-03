@@ -1,0 +1,19 @@
+#pragma once
+#include "main.h"
+
+#define gpioHtim (&htimX)
+extern TIM_HandleTypeDef htimX;
+#define neoPixelHtim htimX
+extern TIM_HandleTypeDef htimX;
+#define dacAdcHtim htimX
+extern UART_HandleTypeDef huartX;
+#define dbgHuart huartX
+extern I2C_HandleTypeDef hi2cX;
+#define trillHi2c hi2cX
+extern DAC_HandleTypeDef hdacX;
+#define dac0Handle hdacX
+#define dac0Channel DAC_CHANNEL_X
+#define dac1Handle hdacX
+#define dac1Channel DAC_CHANNEL_X
+extern ADC_HandleTypeDef hadcX;
+#define adcHandle hadcX
