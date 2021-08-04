@@ -1,8 +1,8 @@
 #pragma once
 #ifdef __cplusplus
-extern "C"
+extern "C" {
 #endif
-void TrillRackApplication();
+int TrillRackApplication();
 #ifdef __cplusplus
-void TrillRackApplication();
+}
 #endif

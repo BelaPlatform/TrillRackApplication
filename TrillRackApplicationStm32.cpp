@@ -483,11 +483,13 @@ static void render(uint8_t end)
 #include <stdlib.h> // atoi below
 
 #ifdef NEOPIXEL_USE_CLASS
-extern int npSetup(void);
-extern ssize_t npSend(const uint8_t* rgb, size_t length);
-extern void npSendColorToAll(uint32_t val);
-extern void npDone();
-extern uint8_t npReady();
+extern "C" {
+  int npSetup(void);
+  ssize_t npSend(const uint8_t* rgb, size_t length);
+  void npSendColorToAll(uint32_t val);
+  void npDone();
+  uint8_t npReady();
+};
 
 #else // NEOPIXEL_USE_CLASS
 volatile uint8_t gNpBusyFlag = 0;
