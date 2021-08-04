@@ -357,6 +357,7 @@ static int gpioHighRateStart()
 
 static void render(uint8_t end);
 
+#if defined(DAC_USE_DMA) || defined(ADC_USE_DMA) || defined(GPIO_OUT_USE_DMA) || defined(GPIO_IN_USE_DMA)
 static void streamComplete(Stream stream, uint8_t end)
 {
   static uint8_t streamStates[kNumStreams];
@@ -476,6 +477,7 @@ static void render(uint8_t end)
   HAL_GPIO_WritePin(DEBUG3_GPIO_Port, DEBUG3_Pin, GPIO_PIN_RESET);
 #endif // TOGGLE_DEBUG_PINS
 }
+#endif // any DMA
 
 #ifdef NEOPIXEL_USE_TIM
 
@@ -719,7 +721,8 @@ void TrillRackApplication()
     uint8_t receiveBuffer[kNumTouches * 2 * 2];
 #endif // TRILL_USE_CLASS
 #ifdef I2C_USE_DMA
-    // nothing
+    // TODO: does the below make sense?
+    memcpy(receiveBuffer, gI2cLatestRecv, sizeof(receiveBuffer));
 #else // I2C_USE_DMA
 #ifdef TRILL_USE_CLASS
     ret = trillRead();
@@ -744,7 +747,6 @@ void TrillRackApplication()
       firstSize = 4096 * trillTouchSize(0);
     }
 #else // TRILL_USE_CLASS
-    memcpy(receiveBuffer, gI2cLatestRecv, sizeof(receiveBuffer));
     for(unsigned int n = 0; n < kNumTouches; ++n)
     {
       uint16_t location = ((receiveBuffer[2 * n] << 8) + receiveBuffer[2 * n + 1]);
