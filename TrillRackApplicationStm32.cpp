@@ -567,11 +567,13 @@ void TrillRackApplication()
   printf("Booted\n\r");
   // Calibrate The ADC On Power-Up For Better Accuracy
   HAL_ADCEx_Calibration_Start(&adcHandle, ADC_SINGLE_ENDED);
-  // powercycle the Trill
-  HAL_GPIO_WritePin(TRILL_3V3_GPIO_Port, TRILL_3V3_Pin, GPIO_PIN_RESET);
-  HAL_Delay(200);
+  // turn on the SDA pullup
+  HAL_GPIO_WritePin(PSOC_PULLUP_SDA_GPIO_Port, PSOC_PULLUP_SDA_Pin, GPIO_PIN_SET);
+  // powercycle the Trill (via external inverting mosfet)
   HAL_GPIO_WritePin(TRILL_3V3_GPIO_Port, TRILL_3V3_Pin, GPIO_PIN_SET);
-  HAL_Delay(200); // wait less than 190ms and the I2C transaction will fail
+  HAL_Delay(200);
+  HAL_GPIO_WritePin(TRILL_3V3_GPIO_Port, TRILL_3V3_Pin, GPIO_PIN_RESET);
+  HAL_Delay(250); // wait for device to be receptive to I2C transactions
 
 #ifdef TRILL_RACK_INTERFACE
   int ret = tr_setup();
