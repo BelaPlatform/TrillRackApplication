@@ -561,7 +561,7 @@ void HAL_TIM_PWM_PulseFinishedCallback(TIM_HandleTypeDef *htim)
   }
 }
 #endif // NEOPIXEL_USE_TIM
-void TrillRackApplication()
+int TrillRackApplication()
 {
   RetargetInit(&dbgHuart);
   printf("Booted\n\r");
@@ -631,29 +631,72 @@ void TrillRackApplication()
 #endif// TRILL_USE_CLASS
 #endif // TRILL_RACK_INTERFACE
 #ifdef I2C_USE_DMA
-  HAL_I2C_Master_Receive_DMA(&trillHi2c, gI2cAddress, gI2cDmaRecv, gI2cDmaRecvSize);
+  ret = HAL_I2C_Master_Receive_DMA(&trillHi2c, gI2cAddress, gI2cDmaRecv, gI2cDmaRecvSize);
+  if(HAL_OK != ret)
+  {
+    fprintf(stderr, "I2C_Master_Receive_DMA failed: %d\n", ret);
+    return 1;
+  }
 #endif // I2C_USE_DMA
 #ifdef DAC_USE_DMA
-  HAL_DAC_Start_DMA(&dac0Handle, dac0Channel, (uint32_t*)gDacOutputs[0], kDoubleBufferSize, DAC_ALIGN_12B_R);
-  HAL_DAC_Start_DMA(&dac1Handle, dac1Channel, (uint32_t*)gDacOutputs[1], kDoubleBufferSize, DAC_ALIGN_12B_R);
+  ret = HAL_DAC_Start_DMA(&dac0Handle, dac0Channel, (uint32_t*)gDacOutputs[0], kDoubleBufferSize, DAC_ALIGN_12B_R);
+  if(HAL_OK != ret)
+  {
+    fprintf(stderr, "DAC_Start_DMA 0 failed: %d\n", ret);
+    return 1;
+  }
+  ret = HAL_DAC_Start_DMA(&dac1Handle, dac1Channel, (uint32_t*)gDacOutputs[1], kDoubleBufferSize, DAC_ALIGN_12B_R);
+  if(HAL_OK != ret)
+  {
+    fprintf(stderr, "DAC_Start_DMA 1 failed: %d\n", ret);
+    return 1;
+  }
 #else // DAC_USE_DMA
-  HAL_DAC_Start(&dac0Handle, dac0Channel);
-  HAL_DAC_Start(&dac1Handle, dac1Channel);
+  ret = HAL_DAC_Start(&dac0Handle, dac0Channel);
+  if(HAL_OK != ret)
+  {
+    fprintf(stderr, "Error: HAL_DAC_Start()\n\r");
+    return 1;
+  }
+  ret = HAL_DAC_Start(&dac1Handle, dac1Channel);
+  if(HAL_OK != ret)
+  {
+    fprintf(stderr, "Error: HAL_DAC_Start()\n\r");
+    return 1;
+  }
 #endif // DAC_USE_DMA
 #ifdef ADC_USE_DMA
-  HAL_ADC_Start_DMA(&adcHandle, (uint32_t*)gAdcInputs, kDoubleBufferSize);
+  ret = HAL_ADC_Start_DMA(&adcHandle, (uint32_t*)gAdcInputs, kDoubleBufferSize);
+  if(HAL_OK != ret)
+  {
+    fprintf(stderr, "ADC_Start_DMA failed: %d\n", ret);
+    return 1;
+  }
 #else // ADC_USE_DMA
   HAL_ADC_Start(&adcHandle);
 #endif// ADC_USE_DMA
 #if defined(GPIO_OUT_USE_DMA) || defined(GPIO_IN_USE_DMA)
-  gpioHighRateInit();
+  if(gpioHighRateInit())
+  {
+    fprintf(stderr, "gpioHighRateInit failed\n");
+    return 1;
+  }
 #endif // defined(GPIO_OUT_USE_DMA) || defined(GPIO_IN_USE_DMA)
 
 #if defined(GPIO_OUT_USE_DMA) || defined(GPIO_IN_USE_DMA)
-  gpioHighRateStart();
+  if(gpioHighRateStart())
+  {
+    fprintf(stderr, "gpioHighRateStart failed\n");
+    return 1;
+  }
 #endif // defined(GPIO_OUT_USE_DMA) || defined(GPIO_IN_USE_DMA)
 #if defined(DAC_USE_DMA) || defined (ADC_USE_DMA)
-  HAL_TIM_Base_Start(&dacAdcHtim);
+  ret = HAL_TIM_Base_Start(&dacAdcHtim);
+  if(HAL_OK != ret)
+  {
+    fprintf(stderr, "TIM_Base_Start for DAC/ADC failed: %d\n", ret);
+    return 1;
+  }
 #endif // DAC_USE_DMA || ADC_USE_DMA
   while (1)
   {
