@@ -1,4 +1,5 @@
 #include "trill-neopixel/NeoPixel.h"
+#include <TrillRackApplication_bsp.h>
 
 extern "C" {
 int npSetup(void);
@@ -15,9 +16,8 @@ float trillTouchLocation(unsigned int n);
 float trillTouchSize(unsigned int n);
 }
 
-extern TIM_HandleTypeDef htim2;
 enum { kNumLeds = 16 };
-static Stm32NeoPixelT<uint32_t, kNumLeds> stm32Np(&htim2, TIM_CHANNEL_2, 66, 33);
+static Stm32NeoPixelT<uint32_t, kNumLeds> stm32Np(&neoPixelHtim, neoPixelHtim_TIM_CHANNEL_x, 66, 33);
 static NeoPixel np(kNumLeds, 0, NEO_RGB);
 
 int npSetup()

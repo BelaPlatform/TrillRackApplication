@@ -44,7 +44,7 @@ const unsigned int kTimeout = 10;
 #define ADC_USE_DMA
 #define GPIO_OUT_USE_DMA
 #define GPIO_IN_USE_DMA
-#define NEOPIXEL_USE_TIM // uses TIM2, assuming period is 100 and the resulting clock is 800kHz
+#define NEOPIXEL_USE_TIM
 #define TRILL_RACK_INTERFACE
 
 #ifdef TRILL_RACK_INTERFACE
@@ -204,7 +204,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 #ifdef GPIO_OUT_USE_DMA
 static uint32_t gGpioOut[kDoubleBufferSize];
 GPIO_TypeDef* gGpioHighRateOutBank = GPIOB;
-const unsigned int kGpioHighRateOutTimerChannel = 2;
+const unsigned int kGpioHighRateOutTimerChannel = gpioHtimChannelOut;
 const uint16_t kGpioOutMask = 0 & (1 << 6); // what GPIO bits to actually write to
 
 static void digitalWriteInit(uint8_t end)
@@ -253,7 +253,7 @@ static void gpioErrorCb(DMA_HandleTypeDef* hdma)
 
 static uint16_t gGpioIn[kDoubleBufferSize];
 const GPIO_TypeDef* gGpioHighRateInBank = GPIOB;
-const unsigned int kGpioHighRateInTimerChannel = 1;
+const unsigned int kGpioHighRateInTimerChannel = gpioHtimChannelIn;
 
 static inline int digitalRead(uint8_t end, unsigned int frame, unsigned int channel)
 {
