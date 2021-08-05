@@ -526,7 +526,7 @@ void WS2812_Send (uint32_t color)
   pwmData[kNumData - 1] = 0; // ensure the last PWM value is 0, so if the DMA callback arrives late, we have stopped sending out stuff already.
   HAL_Delay(1); // min delay between repetitions
   neoPixelHtim.Instance->CCR2 = 0;
-  HAL_TIM_PWM_Start_DMA(&neoPixelHtim, TIM_CHANNEL_2, (uint32_t *)pwmData, kNumData);
+  HAL_TIM_PWM_Start_DMA(&neoPixelHtim, neoPixelHtim_TIM_CHANNEL_x, (uint32_t *)pwmData, kNumData);
 }
 #endif // NEOPIXEL_USE_CLASS
 
@@ -554,7 +554,7 @@ void HAL_TIM_PWM_PulseFinishedCallback(TIM_HandleTypeDef *htim)
 #ifdef NEOPIXEL_USE_CLASS
     npDone();
 #else // NEOPIXEL_USE_CLASS
-    HAL_TIM_PWM_Stop_DMA(htim, TIM_CHANNEL_2);
+    HAL_TIM_PWM_Stop_DMA(htim, neoPixelHtim_TIM_CHANNEL_x);
     gNpBusyFlag = 0;
 #endif // NEOPIXEL_USE_CLASS
 #endif // TRILL_RACK_INTERFACE

@@ -8,6 +8,7 @@ extern TIM_HandleTypeDef htimX;
 extern TIM_HandleTypeDef htimX;
 #define neoPixelHtim htimX
 #define neoPixelHtim_TIM_CHANNEL_x TIM_CHANNEL_x
+#define neoPixelHtim_COUNTER_PERIOD TIMx_COUNTER_PERIOD
 extern TIM_HandleTypeDef htimX;
 #define dacAdcHtim htimX
 extern UART_HandleTypeDef huartX;

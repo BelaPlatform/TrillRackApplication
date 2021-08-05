@@ -16,8 +16,8 @@ float trillTouchLocation(unsigned int n);
 float trillTouchSize(unsigned int n);
 }
 
-enum { kNumLeds = 16 };
-static Stm32NeoPixelT<uint32_t, kNumLeds> stm32Np(&neoPixelHtim, neoPixelHtim_TIM_CHANNEL_x, 66, 33);
+enum { kNumLeds = 23 };
+static Stm32NeoPixelT<uint32_t, kNumLeds> stm32Np(&neoPixelHtim, neoPixelHtim_TIM_CHANNEL_x, 0.66 * neoPixelHtim_COUNTER_PERIOD, 0.33 * neoPixelHtim_COUNTER_PERIOD);
 static NeoPixel np(kNumLeds, 0, NEO_RGB);
 
 int npSetup()
