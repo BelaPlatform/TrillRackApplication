@@ -5,7 +5,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include "Bela.h"
 
+const float SAMPLE_RATE = 42500;
 enum {
   kCommandNone = 0,
   kCommandMode = 1,
@@ -38,7 +40,7 @@ enum { kNumTouches = 5 };
 uint8_t gI2cAddress = 0x20 << 1;
 const unsigned int kTimeout = 10;
 
-#define TOGGLE_DEBUG_PINS
+//#define TOGGLE_DEBUG_PINS
 #define I2C_USE_DMA
 #define DAC_USE_DMA
 #define ADC_USE_DMA
@@ -110,7 +112,7 @@ typedef enum {
 } Stream;
 
 static void streamComplete(Stream stream, uint8_t end);
-enum { kDoubleBufferSize = 64 };
+enum { kDoubleBufferSize = 128 };
 
 #ifdef DAC_USE_DMA
 enum { kDacNumChannels = 2 };
@@ -120,15 +122,15 @@ uint16_t gDacNext[kDacNumChannels];
 static void dacCb(unsigned int channel, unsigned int end)
 {
 #ifdef TOGGLE_DEBUG_PINS
-  HAL_GPIO_WritePin(DEBUG0_GPIO_Port, DEBUG0_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(DEBUG3_GPIO_Port, DEBUG3_Pin, GPIO_PIN_SET);
   if(0 == end)
-    HAL_GPIO_WritePin(DEBUG0_GPIO_Port, DEBUG0_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(DEBUG3_GPIO_Port, DEBUG3_Pin, GPIO_PIN_RESET);
 #endif // TOGGLE_DEBUG_PINS
   Stream stream = channel ? kDAC1 : kDAC0;
   streamComplete(stream, end);
 #ifdef TOGGLE_DEBUG_PINS
   if(1 == end)
-    HAL_GPIO_WritePin(DEBUG0_GPIO_Port, DEBUG0_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(DEBUG3_GPIO_Port, DEBUG3_Pin, GPIO_PIN_RESET);
 #endif // TOGGLE_DEBUG_PINS
 }
 
@@ -205,7 +207,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 static uint32_t gGpioOut[kDoubleBufferSize];
 GPIO_TypeDef* gGpioHighRateOutBank = GPIOB;
 const unsigned int kGpioHighRateOutTimerChannel = gpioHtimChannelOut;
-const uint16_t kGpioOutMask = 0 & (1 << 6); // what GPIO bits to actually write to
+static const uint16_t kGpioOutMask = (DEBUG1_Pin | DEBUG2_Pin | DEBUG3_Pin | SW_LED_Pin); // what GPIO bits to actually write to
 
 static void digitalWriteInit(uint8_t end)
 {
@@ -213,7 +215,7 @@ static void digitalWriteInit(uint8_t end)
   memset(gGpioOut + off, 0, sizeof(gGpioOut) / 2);
 }
 
-static void digitalWrite(uint8_t end, unsigned int frame, unsigned int channel, uint8_t val)
+static void digitalWriteLowLevel(uint8_t end, unsigned int frame, unsigned int channel, uint8_t val)
 {
   unsigned int off = end ? kDoubleBufferSize / 2 : 0;
   // the word will be written to GPIOx_BSRR Bit Set Reset register
@@ -355,7 +357,7 @@ static int gpioHighRateStart()
 }
 #endif // defined(GPIO_OUT_USE_DMA) || defined (GPIO_IN_USE_DMA)
 
-static void render(uint8_t end);
+static void processingCallback(uint8_t end);
 
 #if defined(DAC_USE_DMA) || defined(ADC_USE_DMA) || defined(GPIO_OUT_USE_DMA) || defined(GPIO_IN_USE_DMA)
 static void streamComplete(Stream stream, uint8_t end)
@@ -372,31 +374,73 @@ static void streamComplete(Stream stream, uint8_t end)
     }
   }
   if(ready)
-    render(end);
+    processingCallback(end);
 }
 
-static void render(uint8_t end)
+static void processingCallback(uint8_t end)
 {
 #ifdef TOGGLE_DEBUG_PINS
-  HAL_GPIO_WritePin(DEBUG3_GPIO_Port, DEBUG3_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(DEBUG0_GPIO_Port, DEBUG0_Pin, GPIO_PIN_SET);
 #endif // TOGGLE_DEBUG_PINS
-#ifdef DAC_USE_DMA
-#ifdef TRILL_RACK_INTERFACE
-  tr_process(NULL);
-  // set DACx based on gDacNext[x]
-  for(unsigned int channel = 0; channel < kDacNumChannels; ++channel)
+  enum { frames = kDoubleBufferSize / 2 };
+  static float analogIn[frames];
+  static float analogOut[frames * kDacNumChannels];
+  static uint32_t digital[frames];
+  static BelaContext ctx =
   {
-    static float past[kDacNumChannels];
-//    float tmp = gDacOutputs[channel][kDoubleBufferSize / 2 + kDoubleBufferSize / 2 * (!end) - 1];
-    float tmp = past[channel];
-    float alpha = 0.9;
-    for(unsigned int n = 0; n < kDoubleBufferSize / 2; ++n)
+      .analogIn = analogIn,
+      .analogOut = analogOut,
+      .analogInChannels = 1,
+      .analogOutChannels = kDacNumChannels,
+      .analogFrames = frames,
+      .analogSampleRate = SAMPLE_RATE,
+      .digital = digital,
+      .digitalChannels = 16,
+      .digitalFrames = frames,
+      .digitalSampleRate = SAMPLE_RATE,
+  };
+  size_t dmaBufferOffset = end * kDoubleBufferSize / 2;
+#ifdef ADC_USE_DMA
+  assert(1 == ctx.analogInChannels); // loop below assumes 1 channel
+  for(size_t n = 0; n < ctx.analogFrames; ++n)
+    ctx.analogIn[n] = gAdcInputs[dmaBufferOffset + n] / (4096.f * 8.f);
+#endif // ADC_USE_DMA
+  render(&ctx, nullptr);
+  const float dacMax = 4095.f / 4096.f;
+  const float dacMin = 0;
+#ifdef DAC_USE_DMA
+  for(size_t n = 0; n < ctx.analogFrames; ++n)
+  {
+    for(size_t c = 0; c < ctx.analogOutChannels; ++c)
     {
-      tmp = tmp * alpha + gDacNext[channel] * (1.f - alpha);
-      gDacOutputs[channel][n + end * kDoubleBufferSize / 2] = tmp;
+      float val = ctx.analogOut[n * ctx.analogOutChannels + c];
+      val = val > dacMax ? dacMax : val;
+      val = val < dacMin ? dacMin : val;
+      gDacOutputs[c][dmaBufferOffset + n] = val * 4096.f;
     }
-    past[channel] = tmp;
   }
+#endif // DAC_USE_DMA
+#ifdef GPIO_OUT_USE_DMA
+  for(size_t n = 0; n < ctx.digitalFrames; ++n)
+  {
+    uint32_t d = digital[n];
+    uint16_t outputChannels = ~(d & 0xffff) & kGpioOutMask; // lower word is direction: output channels are set to 0
+    uint16_t setValues = outputChannels & (d >> 16); // upper word is output value
+    uint16_t resetValues = outputChannels & (~(d >> 16));
+    // the word will be written to GPIOx_BSRR Bit Set Reset register
+    // if(val), set bit in the lower half-word(SET), else in the upper half-word(RESET)
+    gGpioOut[dmaBufferOffset + n] = ((resetValues << 16) | setValues);
+  }
+#endif // GPIO_OUT_USE_DMA
+#ifdef TOGGLE_DEBUG_PINS
+  HAL_GPIO_WritePin(DEBUG0_GPIO_Port, DEBUG0_Pin, GPIO_PIN_RESET);
+#endif // TOGGLE_DEBUG_PINS
+}
+
+void render(BelaContext *context, void *userData)
+{
+#ifdef TRILL_RACK_INTERFACE
+  tr_process(context);
 #else // TRILL_RACK_INTERFACE
   // set DAC0 based on gDacNext[0]
   unsigned int channel = 0;
@@ -410,72 +454,76 @@ static void render(uint8_t end)
       gDacOutputs[channel][n + end * kDoubleBufferSize / 2] = tmp;
     }
   }
-#if 0
-  {
-    // set DAC1 to echo ADC
-    channel = 1;
-    for(unsigned int n = 0; n < kDoubleBufferSize / 2; ++n)
-    {
-      unsigned int idx = n + end * kDoubleBufferSize / 2;
-  #ifdef ADC_USE_DMA
-      gDacOutputs[channel][idx] = gAdcInputs[idx];
-  #endif // ADC_USE_DMA
-    }
-  }
-#else
-  {
-    //set DAC1 to otuput a sinewave
-    channel = 1;
-    static float amp = 0;
-    static float ampSig = 1;
-    static float phase = 0;
-    const float kAmpMax = 0.1;
-    const float kAmpMin = 0;
-    for(unsigned int n = 0; n < kDoubleBufferSize / 2; ++n)
-    {
-      unsigned int idx = n + end * kDoubleBufferSize / 2;
-      phase += 2.f * (float)M_PI * 400.f / 40000.f;
-      if(phase > M_PI)
-        phase -= 2.f * (float)M_PI;
-      float out = sinf(phase) * amp;
-      amp += ampSig * 0.1f / 40000.f;
-      if(amp > kAmpMax) {
-        ampSig = -1;
-        amp = kAmpMax;
-      }
-      if(amp < kAmpMin) {
-        ampSig = 1;
-        amp = 0;
-      }
-      gDacOutputs[channel][idx] = (out * 0.5f + 0.5f) * (1 << 12) + 0.5f;
-    }
-  }
-#endif
 #endif // TRILL_RACK_INTERFACE
-#endif // DAC_USE_DMA
-#ifdef GPIO_OUT_USE_DMA
+#if 0
   { // output a clock on kTestChannel
     enum { kOnes = 5, kZeros = 1};
     enum { kTestChannel = 6 };
     for(unsigned int n = 0; n < kOnes; ++n)
-      digitalWrite(end, n, kTestChannel, 1);
+      digitalWrite(context, n, kTestChannel, 1);
     for(unsigned int n = kOnes; n < kOnes + kZeros; ++n)
-      digitalWrite(end, n, kTestChannel, 0);
-    const int kNumBits = kDoubleBufferSize / 2 - kOnes - kZeros;
+      digitalWrite(context, n, kTestChannel, 0);
+    const int kNumBits = context->digitalFrames - kOnes - kZeros;
     static int count = 0;
     for(int n = 0; n < kNumBits; ++n)
     {
       unsigned int frame = n + kOnes + kZeros;
-      digitalWrite(end, frame, kTestChannel, (count >> n) & 1);
+      digitalWrite(context, frame, kTestChannel, (count >> n) & 1);
     }
     ++count;
     if(count >= (1 << kNumBits))
       count = 0;
   }
-#endif // GPIO_USE_DMA
-#ifdef TOGGLE_DEBUG_PINS
-  HAL_GPIO_WritePin(DEBUG3_GPIO_Port, DEBUG3_Pin, GPIO_PIN_RESET);
-#endif // TOGGLE_DEBUG_PINS
+#endif
+#if 1
+  {
+    // set DACx to echo ADC
+    unsigned int outChannel = 1;
+    for(unsigned int n = 0; n < context->analogFrames; ++n)
+    {
+      analogWriteOnce(context, n, outChannel, analogRead(context, n, 0));
+    }
+  }
+#endif
+#if 1
+  {
+    //set DAC to output a sinewave
+    int channel = 0;
+    static float amp = 0.99;
+    static float ampSig = 1;
+    static float phase = 0;
+    const float kAmpMax = 0.1;
+    const float kAmpMin = 0;
+    for(unsigned int n = 0; n < context->analogFrames; ++n)
+    {
+      phase += 2.f * (float)M_PI * 400.f / context->analogSampleRate;
+      if(phase > M_PI)
+        phase -= 2.f * (float)M_PI;
+      static int count = 0;
+      count += 512;
+      float out = count / 4096.f;
+      if(count >= 4096)
+        count = 0; // hard sync
+        //      float out = sinf(phase) * amp;
+//      amp += ampSig * 0.1f / context->analogSampleRate;
+//      if(amp > kAmpMax) {
+//        ampSig = -1;
+//        amp = kAmpMax;
+//      }
+//      if(amp < kAmpMin) {
+//        ampSig = 1;
+//        amp = 0;
+//      }
+      analogWriteOnce(context, n, channel, out * 0.5f + 0.5f);
+    }
+  }
+#endif
+#if 1
+  for(size_t n = 0; n < context->digitalFrames; ++n)
+  {
+    context->digital[n] = (0xffff << 16) * (n & 1);
+  }
+#endif
 }
 #endif // any DMA
 
