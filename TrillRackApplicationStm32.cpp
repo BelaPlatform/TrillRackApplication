@@ -65,7 +65,7 @@ float trillTouchLocation(unsigned int n);
 float trillTouchSize(unsigned int n);
 #endif // TRILL_USE_CLASS
 
-enum { gI2cDmaRecvSize = 48 }; //kNumTouches * 2 * 2 };
+enum { gI2cDmaRecvSize = 60 };
 uint8_t gI2cDmaRecv[gI2cDmaRecvSize];
 uint8_t gI2cLatestRecv[gI2cDmaRecvSize];
 
