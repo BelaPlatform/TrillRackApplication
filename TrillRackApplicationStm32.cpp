@@ -400,6 +400,15 @@ static void processingCallback(uint8_t end)
       .digitalSampleRate = SAMPLE_RATE,
   };
   size_t dmaBufferOffset = end * kDoubleBufferSize / 2;
+#ifdef GPIO_IN_USE_DMA
+  for(size_t n = 0; n < ctx.digitalFrames; ++n)
+  {
+    // lower word is direction, upper word is input value
+    // For the pins set as an input, we set the upper word according to the GPIO status.
+    uint32_t inputChannels = digital[n] & 0xffff;
+    digital[n] = ((gGpioIn[dmaBufferOffset + n] & inputChannels) << 16) | inputChannels;
+  }
+#endif // GPIO_IN_USE_DMA
 #ifdef ADC_USE_DMA
   assert(1 == ctx.analogInChannels); // loop below assumes 1 channel
   for(size_t n = 0; n < ctx.analogFrames; ++n)
