@@ -527,7 +527,7 @@ void render(BelaContext *context, void *userData)
     }
   }
 #endif
-#if 1
+#if 0
   for(size_t n = 0; n < context->digitalFrames; ++n)
   {
     context->digital[n] = (0xffff << 16) * (n & 1);
