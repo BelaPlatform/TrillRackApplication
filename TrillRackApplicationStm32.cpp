@@ -257,7 +257,7 @@ static uint16_t gGpioIn[kDoubleBufferSize];
 const GPIO_TypeDef* gGpioHighRateInBank = GPIOB;
 const unsigned int kGpioHighRateInTimerChannel = gpioHtimChannelIn;
 
-static inline int digitalRead(uint8_t end, unsigned int frame, unsigned int channel)
+static inline int digitalReadLowLevel(uint8_t end, unsigned int frame, unsigned int channel)
 {
   unsigned int off = end ? kDoubleBufferSize / 2 : 0;
   uint16_t val = gGpioIn[frame + off] & (1 << (channel));
@@ -271,7 +271,7 @@ static void gpioHighRateInDone(uint8_t end)
 //  HAL_GPIO_WritePin(DEBUG3_GPIO_Port, DEBUG3_Pin, 1);
 #endif // TOGGLE_DEBUG_PINS
   streamComplete(kGpioIn, end);
-//  printf("%x \n\r", digitalRead(end, 0, 4));
+//  printf("%x \n\r", digitalReadLowLevel(end, 0, 4));
 #ifdef TOGGLE_DEBUG_PINS
 //  HAL_GPIO_WritePin(DEBUG3_GPIO_Port, DEBUG3_Pin, 0);
 #endif // TOGGLE_DEBUG_PINS
