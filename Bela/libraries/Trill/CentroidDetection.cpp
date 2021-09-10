@@ -54,7 +54,7 @@ int CentroidDetection::setup(const std::vector<unsigned int>& order, unsigned in
 	sizes.resize(maxNumCentroids);
 	data.resize(order.size());
 	setSizeScale(sizeScale);
-  setNoiseThreshold(0);
+	setNoiseThreshold(0);
 	cc = std::shared_ptr<CalculateCentroids>(new CalculateCentroids());
 	setMultiplierBits(cc->SLIDER_BITS);
 	num_touches = 0;
@@ -69,7 +69,7 @@ void CentroidDetection::setWrapAround(unsigned int n)
 void CentroidDetection::setMultiplierBits(unsigned int n)
 {
 	cc->SLIDER_BITS = n;
-	locationScale = order.size() * (1 << cc->SLIDER_BITS);
+	locationScale = (order.size() - 1) * (1 << cc->SLIDER_BITS);
 }
 
 void CentroidDetection::process(const DATA_T* rawData)
