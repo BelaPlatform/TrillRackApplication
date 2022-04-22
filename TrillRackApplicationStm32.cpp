@@ -694,7 +694,8 @@ static void i2cPinsAlt(bool i2c)
 		HAL_GPIO_WritePin(PSOC_PULLUP_SDA_GPIO_Port, PSOC_PULLUP_SDA_Pin, GPIO_PIN_SET);
 }
 
-uint8_t program[8192] = {};
+extern uint8_t trill_program_start;
+extern uint8_t trill_program_end;
 int TrillRackApplication()
 {
   RetargetInit(&dbgHuart);
@@ -702,16 +703,13 @@ int TrillRackApplication()
   // Calibrate The ADC On Power-Up For Better Accuracy
   HAL_ADCEx_Calibration_Start(&adcHandle, ADC_SINGLE_ENDED);
 
-  srand(1234);
-  for(unsigned int n = 0; n < sizeof(program); ++n)
-	  program[n] = rand();
-  program[sizeof(program) - 1]++;
   // set pins in programming mode
   HAL_GPIO_WritePin(TRILL_3V3_GPIO_Port, TRILL_3V3_Pin, GPIO_PIN_SET);
   i2cPinsAlt(false);
-  // attempt to program trill
-  programTrillHelper(program, sizeof(program));
-  return 0;
+  uint8_t* program = &trill_program_start;
+  size_t programSize = &trill_program_end - &trill_program_start;
+  // program Trill
+  programTrillHelper(program, programSize);
   // set pins in I2C mode
   i2cPinsAlt(true);
   // powercycle the Trill (via external inverting mosfet)
