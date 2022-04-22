@@ -618,14 +618,102 @@ void HAL_TIM_PWM_PulseFinishedCallback(TIM_HandleTypeDef *htim)
   }
 }
 #endif // NEOPIXEL_USE_TIM
+
+#include "psoc-programmer-stm32/issp.h"
+int programTrillHelper(uint8_t* program, size_t size){
+	uint8_t security[16] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+	int result = 0;
+	uint16_t checksumRead, checksumWrite;
+
+//	int ISSP_setup(void* sdataBank, uint16_t sdataPin, void* sclkBank, uint16_t sclkPin, void* pwrBank, uint16_t pwrPin, void* tpBank, uint16_t tpPin)
+
+	struct issp_init init = { 0 };
+	init.sdataPort = GPIOA;
+	init.sdataPin =  GPIO_PIN_8;
+	init.sclkPort = GPIOA;
+	init.sclkPin = GPIO_PIN_9;
+	init.pwrPort = TRILL_3V3_GPIO_Port;
+	init.pwrPin = TRILL_3V3_Pin;
+	init.sclk_delay = 3;
+	result = ISSP_setup(&init);
+	printf("Setup returned %d\n\r", result);
+	if(result)
+		return 1;
+	result = ISSP_verify(program, size);
+	if(!result) {
+		printf("verify returned 0. No need to reflash\n\r");
+		return 0;
+	}
+	printf("verify returned %d. Reflashing\n\r", result);
+	result = ISSP_erase();
+	printf("Erase returned %d\n\r", result);
+	if(result)
+		return 2;
+	result = ISSP_program(program, size, &checksumRead);
+	printf("Program returned %d\n\r", result);
+	printf("Checksum %d\n\r", checksumRead);
+	if(result)
+		return 3;
+	result = ISSP_verify(program, size);
+	printf("Verify returned %d\n\r", result);
+	if(result)
+		return 4;
+	result = ISSP_security(security, 16, &checksumWrite);
+	printf("Security returned %d\n\r", result);
+	printf("Checksum %d\n\r", checksumWrite);
+	if(result)
+		return 5;
+	result = ISSP_restart(0);
+	if(result)
+		return 6;
+	return checksumRead == checksumWrite ? 0 : 7;
+}
+
+static void i2cPinsAlt(bool i2c)
+{
+	// copied from HAL_I2C_MspInit(), without any of the clocks stuff
+	GPIO_InitTypeDef GPIO_InitStruct = {0};
+	/**I2C2 GPIO Configuration
+	PA8     ------> I2C2_SDA
+	PA9     ------> I2C2_SCL
+	 */
+	GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9;
+	GPIO_InitStruct.Mode = i2c ? GPIO_MODE_AF_OD : GPIO_MODE_OUTPUT_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+	GPIO_InitStruct.Alternate = i2c ? GPIO_AF4_I2C2 : 0;
+	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+	// The SDA pullup should be GPIO in high-Z mode for programming and high output for I2C
+	GPIO_InitStruct.Pin = PSOC_PULLUP_SDA_Pin;
+	GPIO_InitStruct.Mode = i2c ? GPIO_MODE_OUTPUT_PP : GPIO_MODE_INPUT;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+	GPIO_InitStruct.Alternate = 0;
+	HAL_GPIO_Init(PSOC_PULLUP_SDA_GPIO_Port, &GPIO_InitStruct);
+	if(i2c)
+		HAL_GPIO_WritePin(PSOC_PULLUP_SDA_GPIO_Port, PSOC_PULLUP_SDA_Pin, GPIO_PIN_SET);
+}
+
+uint8_t program[8192] = {};
 int TrillRackApplication()
 {
   RetargetInit(&dbgHuart);
   printf("Booted\n\r");
   // Calibrate The ADC On Power-Up For Better Accuracy
   HAL_ADCEx_Calibration_Start(&adcHandle, ADC_SINGLE_ENDED);
-  // turn on the SDA pullup
-  HAL_GPIO_WritePin(PSOC_PULLUP_SDA_GPIO_Port, PSOC_PULLUP_SDA_Pin, GPIO_PIN_SET);
+
+  srand(1234);
+  for(unsigned int n = 0; n < sizeof(program); ++n)
+	  program[n] = rand();
+  program[sizeof(program) - 1]++;
+  // set pins in programming mode
+  HAL_GPIO_WritePin(TRILL_3V3_GPIO_Port, TRILL_3V3_Pin, GPIO_PIN_SET);
+  i2cPinsAlt(false);
+  // attempt to program trill
+  programTrillHelper(program, sizeof(program));
+  return 0;
+  // set pins in I2C mode
+  i2cPinsAlt(true);
   // powercycle the Trill (via external inverting mosfet)
   HAL_GPIO_WritePin(TRILL_3V3_GPIO_Port, TRILL_3V3_Pin, GPIO_PIN_SET);
   HAL_Delay(200);

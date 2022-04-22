@@ -1,3 +1,6 @@
 [submodule "trill-neopixel"]
 	path = trill-neopixel
 	url = git@github.com:giuliomoro/trill-neopixel.git
+[submodule "issp-programmer-stm32"]
+	path = psoc-programmer-stm32
+	url = git@github.com:BelaPlatform/psoc-programmer-linux.git
