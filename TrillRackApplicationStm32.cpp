@@ -117,7 +117,7 @@ enum { kDoubleBufferSize = 128 };
 #ifdef DAC_USE_DMA
 enum { kDacNumChannels = 2 };
 static uint16_t gDacOutputs[kDacNumChannels][kDoubleBufferSize];
-uint16_t gDacNext[kDacNumChannels];
+float gDacNext[kDacNumChannels];
 
 static void dacCb(unsigned int channel, unsigned int end)
 {
@@ -449,18 +449,20 @@ static void processingCallback(uint8_t end)
 void render(BelaContext *context, void *userData)
 {
 #ifdef TRILL_RACK_INTERFACE
+//  GPIO_PinState val = HAL_GPIO_ReadPin(SW0_GPIO_Port, SW0_Pin);
+//  HAL_GPIO_WritePin(SW_LED_GPIO_Port, SW_LED_Pin, val);
+//  printf("%d %d %08x %08lx\n\r", HAL_GPIO_ReadPin(SW0_GPIO_Port, SW0_Pin), HAL_GPIO_ReadPin(SW_LED_GPIO_Port, SW_LED_Pin), gGpioHighRateInBank->IDR, context->digital[0]);
   tr_process(context);
-#else // TRILL_RACK_INTERFACE
-  // set DAC0 based on gDacNext[0]
-  unsigned int channel = 0;
-//  for(unsigned int channel = 0; channel < kDacNumChannels; ++channel)
+  for(unsigned int n = 0; n < context->analogFrames; ++n)
   {
-    float tmp = gDacOutputs[channel][kDoubleBufferSize / 2 + kDoubleBufferSize / 2 * (!end) - 1];
-    float alpha = 0.9;
-    for(unsigned int n = 0; n < kDoubleBufferSize / 2; ++n)
+    for(unsigned int channel = 0; channel < kDacNumChannels; ++channel)
     {
-      tmp = tmp * alpha + gDacNext[channel] * (1.f - alpha);
-      gDacOutputs[channel][n + end * kDoubleBufferSize / 2] = tmp;
+      static float pastOut[kDacNumChannels];
+      float tmp = pastOut[channel];
+      float alpha = 0.9;
+      float out = tmp * alpha + gDacNext[channel] * (1.f - alpha);
+      analogWriteOnce(context, n, channel, out);
+      pastOut[channel] = out;
     }
   }
 #endif // TRILL_RACK_INTERFACE
@@ -484,7 +486,7 @@ void render(BelaContext *context, void *userData)
       count = 0;
   }
 #endif
-#if 1
+#if 0
   {
     // set DACx to echo ADC
     unsigned int outChannel = 1;
@@ -494,7 +496,7 @@ void render(BelaContext *context, void *userData)
     }
   }
 #endif
-#if 1
+#if 0
   {
     //set DAC to output a sinewave
     int channel = 0;
@@ -954,8 +956,8 @@ int TrillRackApplication()
     }
 #endif // TRILL_USE_CLASS
 #ifdef DAC_USE_DMA
-    gDacNext[0] = firstLocation;
-    gDacNext[1] = firstSize > 4095 ? 4095 : firstSize;
+    gDacNext[0] = firstLocation / 4096.f;
+    gDacNext[1] = (firstSize > 4095 ? 4095 : firstSize) / 4096.f;
 #else // DAC_USE_DMA
     HAL_DAC_SetValue(&dac0Handle, dac0Channel, DAC_ALIGN_12B_R, firstLocation);
     HAL_DAC_SetValue(&dac1Handle, dac1Channel, DAC_ALIGN_12B_R, firstSize);
