@@ -497,6 +497,19 @@ void render(BelaContext *context, void *userData)
   }
 #endif
 #if 0
+  // generate sawtooths
+  for(unsigned int n = 0; n < context->analogFrames; ++n)
+  {
+	  static unsigned int count = 0;
+	  float out = count / 4096.f;
+	  for(unsigned int c = 0; c < context->analogOutChannels; ++c)
+		  analogWriteOnce(context, n, c, out);
+	  count++;
+	  if(count == 4096)
+		  count = 0;
+  }
+#endif
+#if 0
   {
     //set DAC to output a sinewave
     int channel = 0;
