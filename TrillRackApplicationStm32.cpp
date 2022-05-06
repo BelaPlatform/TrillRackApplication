@@ -412,7 +412,7 @@ static void processingCallback(uint8_t end)
 #ifdef ADC_USE_DMA
   assert(1 == ctx.analogInChannels); // loop below assumes 1 channel
   for(size_t n = 0; n < ctx.analogFrames; ++n)
-    ctx.analogIn[n] = gAdcInputs[dmaBufferOffset + n] / (4096.f * 8.f);
+    ctx.analogIn[n] = 1.f - gAdcInputs[dmaBufferOffset + n] / (4096.f * 8.f); // invert input because of inverting opamp
 #endif // ADC_USE_DMA
   render(&ctx, nullptr);
   const float dacMax = 4095.f / 4096.f;
