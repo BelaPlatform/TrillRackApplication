@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <assert.h>
 #include "Bela.h"
 
 const float SAMPLE_RATE = 42500;
