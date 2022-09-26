@@ -208,7 +208,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 static uint32_t gGpioOut[kDoubleBufferSize];
 GPIO_TypeDef* gGpioHighRateOutBank = GPIOB;
 const unsigned int kGpioHighRateOutTimerChannel = gpioHtimChannelOut;
-static const uint16_t kGpioOutMask = (DEBUG1_Pin | DEBUG2_Pin | DEBUG3_Pin | SW_LED_Pin); // what GPIO bits to actually write to
+static const uint16_t kGpioOutMask = (DEBUG2_Pin | DEBUG3_Pin | SW_LED_A_Pin | SW_LED_B_Pin); // what GPIO bits to actually write to
 
 static void digitalWriteInit(uint8_t end)
 {
