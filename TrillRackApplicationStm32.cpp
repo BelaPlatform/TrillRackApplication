@@ -118,7 +118,6 @@ enum { kDoubleBufferSize = 128 };
 #ifdef DAC_USE_DMA
 enum { kDacNumChannels = 2 };
 static uint16_t gDacOutputs[kDacNumChannels][kDoubleBufferSize];
-float gDacNext[kDacNumChannels];
 
 static void dacCb(unsigned int channel, unsigned int end)
 {
@@ -450,22 +449,7 @@ static void processingCallback(uint8_t end)
 void render(BelaContext *context, void *userData)
 {
 #ifdef TRILL_RACK_INTERFACE
-//  GPIO_PinState val = HAL_GPIO_ReadPin(SW0_GPIO_Port, SW0_Pin);
-//  HAL_GPIO_WritePin(SW_LED_GPIO_Port, SW_LED_Pin, val);
-//  printf("%d %d %08x %08lx\n\r", HAL_GPIO_ReadPin(SW0_GPIO_Port, SW0_Pin), HAL_GPIO_ReadPin(SW_LED_GPIO_Port, SW_LED_Pin), gGpioHighRateInBank->IDR, context->digital[0]);
   tr_process(context);
-  for(unsigned int n = 0; n < context->analogFrames; ++n)
-  {
-    for(unsigned int channel = 0; channel < kDacNumChannels; ++channel)
-    {
-      static float pastOut[kDacNumChannels];
-      float tmp = pastOut[channel];
-      float alpha = 0.9;
-      float out = tmp * alpha + gDacNext[channel] * (1.f - alpha);
-      analogWriteOnce(context, n, channel, out);
-      pastOut[channel] = out;
-    }
-  }
 #endif // TRILL_RACK_INTERFACE
 #if 0
   { // output a clock on kTestChannel
