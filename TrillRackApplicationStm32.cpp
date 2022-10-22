@@ -398,6 +398,7 @@ static void processingCallback(uint8_t end)
       .digitalChannels = 16,
       .digitalFrames = frames,
       .digitalSampleRate = SAMPLE_RATE,
+      .audioFramesElapsed = 0,
   };
   size_t dmaBufferOffset = end * kDoubleBufferSize / 2;
 #ifdef GPIO_IN_USE_DMA
@@ -414,6 +415,7 @@ static void processingCallback(uint8_t end)
   for(size_t n = 0; n < ctx.analogFrames; ++n)
     ctx.analogIn[n] = 1.f - gAdcInputs[dmaBufferOffset + n] / (4096.f * 8.f); // invert input because of inverting opamp
 #endif // ADC_USE_DMA
+  *((size_t*)&(ctx.audioFramesElapsed)) += ctx.analogFrames;
   render(&ctx, nullptr);
   const float dacMax = 4095.f / 4096.f;
   const float dacMin = 0;

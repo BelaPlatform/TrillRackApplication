@@ -16,6 +16,7 @@ typedef struct {
 	const size_t digitalChannels;
 	const uint32_t digitalFrames;
 	const float digitalSampleRate;
+	const size_t audioFramesElapsed;
 } BelaContext;
 
 void render(BelaContext *context, void *userData);
