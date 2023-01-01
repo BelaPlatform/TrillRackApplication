@@ -846,6 +846,7 @@ int TrillRackApplication()
   while (1)
   {
 #ifdef TRILL_RACK_INTERFACE
+    tr_mainLoop();
     // not much to do here ...
 #else // TRILL_RACK_INTERFACE
 #ifdef NEOPIXEL_USE_TIM
