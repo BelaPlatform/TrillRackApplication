@@ -1,3 +1,7 @@
+// this is only needed when TrillRackApplicationStm32.cpp drops some defines.
+// As this contains some big-ish static objects, we don't want to build it in regular use,
+//although the linker may be smart enough to know it doesn't need to link it in. But as I see some small ( some 200 bytes) in binary size when this is ifdef'ed out, it's probably best to exclude it
+#if 0
 #include <TrillRackApplication_bsp.h>
 #include <trill-neopixel/Stm32NeoPixel.h>
 extern "C" {
@@ -107,3 +111,4 @@ float trillTouchSize(unsigned int n)
 {
   return trill.touchSize(n);
 }
+#endif
