@@ -68,7 +68,9 @@ float trillTouchSize(unsigned int n);
 
 enum { gI2cDmaRecvSize = 60 };
 uint8_t gI2cDmaRecv[gI2cDmaRecvSize];
+#ifndef TRILL_RACK_INTERFACE
 uint8_t gI2cLatestRecv[gI2cDmaRecvSize];
+#endif // TRILL_RACK_INTERFACE
 
 void HAL_I2C_ErrorCallback(I2C_HandleTypeDef *hi2c)
 {
