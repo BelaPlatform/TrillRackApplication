@@ -77,6 +77,7 @@ void HAL_I2C_ErrorCallback(I2C_HandleTypeDef *hi2c)
   fprintf(stderr, "HAL_I2C_ErrorCallback. TODO: handle me\n\r");
 }
 
+static volatile bool gIsScanning = false;
 // In order for this to be called, the I2C1 EVENT interrupt must be manually enabled in CubeMx.
 // See https://blog.shirtec.com/2019/10/stm32-hal-i2c-itdma-gotcha.html
 void HAL_I2C_MasterRxCpltCallback(I2C_HandleTypeDef *hi2c)
@@ -93,7 +94,13 @@ void HAL_I2C_MasterRxCpltCallback(I2C_HandleTypeDef *hi2c)
   memcpy(gI2cLatestRecv, gI2cDmaRecv, gI2cDmaRecvSize);
 #endif // TRILL_USE_CLASS
 #endif // TRILL_RACK_INTERFACE
-  HAL_I2C_Master_Receive_DMA(&trillHi2c, gI2cAddress, gI2cDmaRecv, gI2cDmaRecvSize);
+  if(tr_scanRequested())
+  {
+    HAL_I2C_Master_Receive_DMA(&trillHi2c, gI2cAddress, gI2cDmaRecv, gI2cDmaRecvSize);
+    gIsScanning = true;
+  } else {
+    gIsScanning = false;
+  }
 }
 #endif // I2C_USE_DMA
 
@@ -698,6 +705,18 @@ static void i2cPinsAlt(bool i2c)
 		HAL_GPIO_WritePin(PSOC_PULLUP_SDA_GPIO_Port, PSOC_PULLUP_SDA_Pin, GPIO_PIN_SET);
 }
 
+static int startScanning()
+{
+  int ret = HAL_I2C_Master_Receive_DMA(&trillHi2c, gI2cAddress, gI2cDmaRecv, gI2cDmaRecvSize);
+  if(HAL_OK != ret)
+  {
+    fprintf(stderr, "I2C_Master_Receive_DMA failed: %d\n", ret);
+    return 1;
+  }
+  gIsScanning = 1;
+  return 0;
+}
+
 extern uint8_t trill_program_start;
 extern uint8_t trill_program_end;
 int TrillRackApplication()
@@ -778,12 +797,9 @@ int TrillRackApplication()
 #endif// TRILL_USE_CLASS
 #endif // TRILL_RACK_INTERFACE
 #ifdef I2C_USE_DMA
-  ret = HAL_I2C_Master_Receive_DMA(&trillHi2c, gI2cAddress, gI2cDmaRecv, gI2cDmaRecvSize);
-  if(HAL_OK != ret)
-  {
-    fprintf(stderr, "I2C_Master_Receive_DMA failed: %d\n", ret);
+  ret = startScanning();
+  if(ret)
     return 1;
-  }
 #endif // I2C_USE_DMA
 #ifdef DAC_USE_DMA
   ret = HAL_DAC_Start_DMA(&dac0Handle, dac0Channel, (uint32_t*)gDacOutputs[0], kDoubleBufferSize, DAC_ALIGN_12B_R);
@@ -849,6 +865,8 @@ int TrillRackApplication()
   {
 #ifdef TRILL_RACK_INTERFACE
     tr_mainLoop();
+    if(tr_scanRequested() && !gIsScanning)
+      startScanning();
     // not much to do here ...
 #else // TRILL_RACK_INTERFACE
 #ifdef NEOPIXEL_USE_TIM
