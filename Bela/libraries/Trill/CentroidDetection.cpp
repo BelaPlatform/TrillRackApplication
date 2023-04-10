@@ -69,7 +69,7 @@ void CentroidDetection::setWrapAround(unsigned int n)
 void CentroidDetection::setMultiplierBits(unsigned int n)
 {
 	cc->SLIDER_BITS = n;
-	locationScale = (order.size() - 1) * (1 << cc->SLIDER_BITS);
+	locationScale = 1.f / ((order.size() - 1) * (1 << cc->SLIDER_BITS));
 }
 
 void CentroidDetection::process(const DATA_T* rawData)
@@ -92,15 +92,15 @@ void CentroidDetection::process(const DATA_T* rawData)
 	{
 		if(0xffff == centroidBuffer[i])
 			break;// at the first non-touch, break
-		centroids[i] = centroidBuffer[i] / locationScale;
-		sizes[i] = sizeBuffer[i] / sizeScale;
+		centroids[i] = centroidBuffer[i] * locationScale;
+		sizes[i] = sizeBuffer[i] * sizeScale;
 	}
 	num_touches = i;
 }
 
 void CentroidDetection::setSizeScale(float sizeScale)
 {
-	this->sizeScale = sizeScale;
+	this->sizeScale = 1.f / sizeScale;
 }
 
 void CentroidDetection::setMinimumTouchSize(DATA_T minSize)
