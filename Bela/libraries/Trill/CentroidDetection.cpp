@@ -161,3 +161,25 @@ CentroidDetection::DATA_T CentroidDetection::compoundTouchSize() const
 		size += touchSize(i);
 	return size;
 }
+
+void CentroidDetectionScaled::setUsableRange(DATA_T min, DATA_T max)
+{
+	this->min = min;
+	this->max = max;
+}
+
+#include <Utilities.h>
+static inline float mapAndConstrain(float x, float in_min, float in_max, float out_min, float out_max)
+{
+	float value = map(x, in_min, in_max, out_min, out_max);
+	value = constrain(value, out_min, out_max);
+	return value;
+}
+
+void CentroidDetectionScaled::process(const DATA_T* rawData)
+{
+	CentroidDetection::process(rawData);
+	size_t numTouches = getNumTouches();
+	for(size_t n = 0; n < numTouches; ++n)
+		centroids[n] = mapAndConstrain(centroids[n], min, max, 0, 1);
+}

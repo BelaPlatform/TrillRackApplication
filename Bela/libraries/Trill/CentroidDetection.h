@@ -36,7 +36,9 @@ public:
 private:
 	typedef uint16_t WORD;
 	class CalculateCentroids;
+protected:
 	std::vector<DATA_T> centroids;
+private:
 	std::vector<DATA_T> sizes;
 	std::vector<WORD> centroidBuffer;
 	std::vector<WORD> sizeBuffer;
@@ -49,4 +51,14 @@ private:
 	std::shared_ptr<CalculateCentroids> cc;
 	unsigned int num_touches;
 	DATA_T noiseThreshold;
+};
+
+class CentroidDetectionScaled : public CentroidDetection
+{
+public:
+	void setUsableRange(DATA_T min, DATA_T max);
+	void process(const DATA_T* rawData);
+private:
+	float min = 0;
+	float max = 1;
 };
