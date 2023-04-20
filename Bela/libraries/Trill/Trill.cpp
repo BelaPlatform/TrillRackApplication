@@ -10,7 +10,7 @@ enum {
 	kCentroidLengthDefault = 20,
 	kCentroidLengthRing = 24,
 	kCentroidLength2D = 32,
-	kRawLength = 60
+	kRawLength = 60,
 };
 
 enum {
@@ -22,18 +22,25 @@ enum {
 	kCommandIdac = 5,
 	kCommandBaselineUpdate = 6,
 	kCommandMinimumSize = 7,
-	kCommandAutoScanInterval = 16,
+	kCommandEventMode = 9,
+	kCommandChannelMaskLow = 10,
+	kCommandChannelMaskHigh = 11,
+	kCommandReset = 12,
+	kCommandFormat = 13,
+	kCommandScanTrigger = 16,
+	kCommandAck = 254,
 	kCommandIdentify = 255
 };
 
 enum {
 	kOffsetCommand = 0,
-	kOffsetData = 4
+	kOffsetStatusByte = 3,
+	kOffsetChannelData = 4,
 };
 
 enum {
 	kNumChannelsBar = 26,
-	kNumChannelsRing = 28,
+	kNumChannelsRing = 30,
 	kNumChannelsMax = 30,
 };
 
@@ -55,11 +62,7 @@ struct TrillDefaults
 };
 
 const float defaultThreshold = 0x28 / 4096.f;
-struct TrillDefaultsMap {
-	Trill::Device device;
-	struct TrillDefaults defaults;
-};
-static const std::array<struct TrillDefaultsMap, 8> trillDefaults = {{
+static const std::map<Trill::Device, struct TrillDefaults> trillDefaults = {
 	{Trill::NONE, TrillDefaults("No device", Trill::AUTO, 0, 0xFF, -1)},
 	{Trill::UNKNOWN, TrillDefaults("Unknown device", Trill::AUTO, 0, 0xFF, -1)},
 	{Trill::BAR, TrillDefaults("Bar", Trill::CENTROID, defaultThreshold, 0x20, 2)},
@@ -68,7 +71,7 @@ static const std::array<struct TrillDefaultsMap, 8> trillDefaults = {{
 	{Trill::RING, TrillDefaults("Ring", Trill::CENTROID, defaultThreshold, 0x38, 2)},
 	{Trill::HEX, TrillDefaults("Hex", Trill::CENTROID, defaultThreshold, 0x40, 1)},
 	{Trill::FLEX, TrillDefaults("Flex", Trill::CENTROID, 0.03, 0x48, 4)},
-}};
+};
 
 static const std::map<Trill::Mode, std::string> trillModes = {
 	{Trill::AUTO, "Auto"},
@@ -94,43 +97,42 @@ static const std::vector<struct trillRescaleFactors_t> trillRescaleFactors ={
 	{.pos = 3712, .posH = 0, .size = 1200}, // FLEX = 6,
 };
 
+struct TrillStatusByte {
+	uint8_t frameId : 6;
+	uint8_t activity : 1;
+	uint8_t initialised : 1;
+	static TrillStatusByte parse(uint8_t statusByte)
+	{
+		return *(TrillStatusByte*)(&statusByte);
+	}
+};
+static_assert(1 == sizeof(TrillStatusByte), "size and layout of TrillStatusByte must match the Trill firmware");
+static_assert(kOffsetStatusByte + sizeof(TrillStatusByte) == kOffsetChannelData, "Assume that channel data is available immediately after the statusByte");
+
 Trill::Trill(){}
 
 Trill::Trill(unsigned int i2c_bus, Device device, uint8_t i2c_address) {
 	setup(i2c_bus, device, i2c_address);
 }
 
-static bool defaultsExistFor(Trill::Device device)
+void Trill::updateChannelMask(uint32_t mask)
 {
-	for(auto& d : trillDefaults)
-		if(d.device == device)
-	return true;
-	return false;
-}
-
-static const TrillDefaults& getDefaultsFor(const Trill::Device device)
-{
-	ssize_t idx = -1;
-	for(size_t n = 0; n < trillDefaults.size(); ++n)
-	{
-		if(device == trillDefaults[n].device)
-		{
-			idx = n;
-			break;
-		}
-	}
-	if(idx < 0)
-		return getDefaultsFor(Trill::NONE);
-	return trillDefaults[idx].defaults;
+	channelMask = (mask & ((1 << getDefaultNumChannels()) - 1));
+	numChannels = std::min(int(getDefaultNumChannels()), __builtin_popcount(channelMask));
 }
 
 int Trill::setup(unsigned int i2c_bus, Device device, uint8_t i2c_address)
 {
-	dataBuffer.resize(kRawLength);
+	// until we find out the actual, disable the version check and allow
+	// for silent failure of commands
+	enableVersionCheck = false;
+	reset();
 	rawData.resize(kNumChannelsMax);
 	address = 0;
+	frameId = 0;
 	device_type_ = NONE;
-	TrillDefaults defaults = getDefaultsFor(device);
+	TrillDefaults defaults = trillDefaults.at(device);
+
 	if(128 <= i2c_address)
 		i2c_address = defaults.address;
 
@@ -144,6 +146,10 @@ int Trill::setup(unsigned int i2c_bus, Device device, uint8_t i2c_address)
 		return 1;
 	}
 
+	// disable scanning so communication is faster
+	// NOTE: ignoring return of setScanTrigger(): for fw < 3, it will
+	// allegedly fail for lack of ack
+	setScanTrigger(kScanTriggerDisabled);
 	if(identify() != 0) {
 		fprintf(stderr, "Unable to identify device\n");
 		return 2;
@@ -152,14 +158,25 @@ int Trill::setup(unsigned int i2c_bus, Device device, uint8_t i2c_address)
 		fprintf(stderr, "Wrong device type detected. `%s` was requested "
 				"but `%s` was detected on bus %d at address %#x(%d).\n",
 				defaults.name.c_str(),
-				getDefaultsFor(device_type_).name.c_str(),
+				trillDefaults.at(device_type_).name.c_str(),
 				i2c_bus, i2c_address, i2c_address
 		       );
 		device_type_ = NONE;
 		return -3;
 	}
 	// if the device was unknown it will have changed by now
-	defaults = getDefaultsFor(device_type_);
+	defaults = trillDefaults.at(device_type_);
+	// now we have a proper version, we can check against it
+	enableVersionCheck = true;
+
+	constexpr uint32_t defaultChannelMask = 0xffffffff;
+	if(firmware_version_ >= 3)
+	{
+		setChannelMask(defaultChannelMask);
+	} else {
+		// only keep track of it for internal purposes
+		updateChannelMask(defaultChannelMask);
+	}
 
 	Mode mode = defaults.mode;
 	if(setMode(mode) != 0) {
@@ -191,20 +208,17 @@ int Trill::setup(unsigned int i2c_bus, Device device, uint8_t i2c_address)
 		return 9;
 	}
 
-	if(prepareForDataRead() != 0) {
-		fprintf(stderr, "Unable to prepare for reading data\n");
-		return 10;
-	}
-
 	address = i2c_address;
 	readErrorOccurred = false;
+
+	if(setScanTrigger(kScanTriggerI2c))
+		return 1;
 	return 0;
 }
 
 Trill::Device Trill::probe(unsigned int i2c_bus, uint8_t i2c_address)
 {
 	Trill t;
-	t.dataBuffer.resize(kRawLength);
 	if(t.initI2C_RW(i2c_bus, i2c_address, -1)) {
 		return Trill::NONE;
 	}
@@ -221,9 +235,9 @@ Trill::~Trill() {
 const std::string& Trill::getNameFromDevice(Device device)
 {
 	__try {
-		return getDefaultsFor(device).name;
+		return trillDefaults.at(device).name;
 	} __catch (std::exception e) {
-		return getDefaultsFor(Device::UNKNOWN).name;
+		return trillDefaults.at(Device::UNKNOWN).name;
 	}
 }
 
@@ -246,8 +260,8 @@ Trill::Device Trill::getDeviceFromName(const std::string& name)
 {
 	for(auto& td : trillDefaults)
 	{
-		Device device = td.device;
-		const std::string& str2 = getDefaultsFor(device).name;
+		Device device = td.first;
+		const std::string& str2 = trillDefaults.at(device).name;
 		if(strCmpIns(name, str2))
 			return Device(device);
 	}
@@ -274,48 +288,165 @@ Trill::Mode Trill::getModeFromName(const std::string& name)
 	return Trill::AUTO;
 }
 
-int Trill::identify() {
-	ssize_t bytesToWrite = 2;
-	char buf[2] = { kOffsetCommand, kCommandIdentify };
-	if((writeBytes(buf, bytesToWrite)) != bytesToWrite)
+// macros to automatically print method names. Using gcc-specific __PRETTY_FUNCTION__.
+#define WRITE_COMMAND_BUF(data) writeCommandAndHandle(data, sizeof(data), __PRETTY_FUNCTION__)
+#define WRITE_COMMAND(command) writeCommandAndHandle(command, __PRETTY_FUNCTION__)
+#define READ_BYTES_FROM(offset,data,size) readBytesFrom(offset, data, size, __PRETTY_FUNCTION__)
+#define READ_BYTE_FROM(offset,byte) readBytesFrom(offset, byte, __PRETTY_FUNCTION__)
+
+int Trill::writeCommandAndHandle(i2c_char_t command, const char* name) {
+	return writeCommandAndHandle(&command, sizeof(command), name);
+}
+
+static void printErrno(int ret)
+{
+	if(-1 == ret)
+		fprintf(stderr, "errno %d, %s.\n", errno, strerror(errno));
+}
+int Trill::writeCommandAndHandle(const i2c_char_t* data, size_t size, const char* name) {
+	constexpr size_t kMaxCommandBytes = 3;
+	if(size > kMaxCommandBytes)
 	{
+		fprintf(stderr, "Trill: cannot write more than 3 bytes to the device\n");
 		return -1;
 	}
-	preparedForDataRead_ = false;
-
-	usleep(commandSleepTime); // need to give enough time to process command
-
-	readBytes(dataBuffer.data(), 4); // discard first read
-
-	ssize_t bytesToRead = 4;
-	ssize_t bytesRead = readBytes(dataBuffer.data(), bytesToRead);
-	if (bytesRead != bytesToRead)
+	i2c_char_t buf[1 + kMaxCommandBytes];
+	buf[0] = kOffsetCommand;
+	for(size_t n = 0; n < size; ++n)
+		buf[n + 1] = data[n];
+	int bytesToWrite = size + 1;
+	if(verbose) {
+		printf("Writing %s :", name);
+		for(ssize_t n = 1; n < bytesToWrite; ++n)
+			printf("%d ", buf[n]);
+		printf("\n");
+	}
+	int ret = writeBytes(buf, bytesToWrite);
+	if(ret != bytesToWrite)
 	{
-		fprintf(stderr, "Failure to read Byte Stream. Read %d bytes, expected %d\n", bytesRead, bytesToRead);
+		fprintf(stderr, "Trill: failed to write command \"%s\"; ret: %d, errno: %d, %s.\n", name, ret, errno, strerror(errno));
+		return 1;
+	}
+	currentReadOffset = buf[0];
+	if(kCommandReset == buf[1])
+		return usleep(500000); // it won't ack after reset ... (TODO: should it?)
+	else
+		return waitForAck(buf[1], name);
+}
+
+int Trill::readBytesFrom(const uint8_t offset, i2c_char_t& byte, const char* name)
+{
+	return readBytesFrom(offset, &byte, sizeof(byte), name);
+}
+
+int Trill::readBytesFrom(const uint8_t offset, i2c_char_t* data, size_t size, const char* name)
+{
+	if(offset != currentReadOffset)
+	{
+		int ret = writeBytes(&offset, sizeof(offset));
+		if(ret != sizeof(offset))
+		{
+			fprintf(stderr, "%s: error while setting read offset\n", name);
+			printErrno(ret);
+			return 1;
+		}
+		currentReadOffset = offset;
+		usleep(commandSleepTime);
+	}
+	ssize_t bytesRead = readBytes(data, size);
+	if (bytesRead != ssize_t(size))
+	{
+		fprintf(stderr, "%s: failed to read %d bytes. ret: %d\n", name, size, bytesRead);
+		printErrno(bytesRead);
+		return 1;
+	}
+	return 0;
+}
+
+int Trill::waitForAck(const uint8_t command, const char* name)
+{
+	if(firmware_version_ && firmware_version_ < 3) {
+		// old firmware, use old sleep time
+		usleep(10000);
+		return 0;
+	}
+	size_t bytesToRead;
+	if(verbose)
+		bytesToRead = 3;
+	else
+		bytesToRead = 1;
+	i2c_char_t buf[bytesToRead];
+	unsigned int sleep = commandSleepTime;
+	unsigned int totalSleep = 0;
+	while(totalSleep < 100000)
+	{
+		usleep(sleep);
+		if(readBytesFrom(kOffsetCommand, buf, sizeof(buf), name))
+			return 1;
+		if(kCommandAck == buf[0])
+		{
+			// The device places the received command number in the
+			// second byte and a command counter in the third byte.
+			// If verbose, those are read and can be inspected for
+			// debugging purposes.
+			verbose && printf("Ack'ed %d(%d) with %d %d %d\n", command, cmdCounter, buf[0], buf[1], buf[2]);
+			if(verbose && (kCommandIdentify != command) && (buf[1] != command || buf[2] != cmdCounter)) {
+				printf("^^^^^ reset cmdCounter\n");
+				cmdCounter = buf[2];
+			} else {
+				cmdCounter++;
+				return 0;
+			}
+		}
+		verbose && printf("sleep %d: %d %d %d\n", sleep, buf[0], buf[1], buf[2]);
+		totalSleep += sleep;
+		sleep *= 2;
+		if(!sleep) // avoid infinite loop in case we are told not to wait for ack
+			break;
+	}
+	fprintf(stderr, "%s: failed to read ack for command %d\n",name,  command);
+	return 1;
+}
+
+#define REQUIRE_FW_AT_LEAST(num) \
+	if(enableVersionCheck && firmware_version_ < num) \
+	{ \
+		fprintf(stderr, "%s unsupported with firmware version %d, requires %d\n", __PRETTY_FUNCTION__, firmware_version_, num); \
+		return 1; \
+	}
+
+int Trill::identify() {
+	// NOTE: ignoring return of WRITE_COMMAND(): for fw < 3, it will
+	// allegedly fail for lack of ack
+	WRITE_COMMAND(kCommandIdentify);
+	i2c_char_t rbuf[3];
+	if(READ_BYTES_FROM(kOffsetCommand, rbuf, sizeof(rbuf)))
+	{
 		device_type_ = NONE;
 		return -1;
 	}
 
 	// if we read back just zeros, we assume the device did not respond
-	if(0 == dataBuffer[1]) {
+	if(0 == rbuf[1]) {
 		device_type_ = NONE;
 		return -1;
 	}
-	Device readDeviceType = (Device)dataBuffer[1];
+	Device readDeviceType = (Device)rbuf[1];
 	// if we do not recognize the device type, we also return an error
-	if(!defaultsExistFor(readDeviceType)) {
+	if(trillDefaults.find(readDeviceType) == trillDefaults.end()) {
 		device_type_ = NONE;
 		return -1;
 	}
 	device_type_ = readDeviceType;
-	firmware_version_ = dataBuffer[2];
+	firmware_version_ = rbuf[2];
 
 	return 0;
 }
 
 void Trill::updateRescale()
 {
-	float scale = 1 << (12 - numBits);
+	enum { kRescaleFactorsComputedAtBits = 12 };
+	float scale = (1 << (16 - numBits)) / float(1 << (16 - kRescaleFactorsComputedAtBits));
 	posRescale = 1.f / trillRescaleFactors[device_type_].pos;
 	posHRescale = 1.f / trillRescaleFactors[device_type_].posH;
 	sizeRescale = scale / trillRescaleFactors[device_type_].size;
@@ -329,213 +460,232 @@ void Trill::printDetails()
 	printf("Firmware version: %d\n", firmwareVersion());
 }
 
-int Trill::setMode(Mode mode) {
-	ssize_t bytesToWrite = 3;
-	if(AUTO == mode)
-		mode = getDefaultsFor(device_type_).mode;
-	char buf[3] = { kOffsetCommand, kCommandMode, (char)mode };
-	if(int writtenValue = (writeBytes(buf, bytesToWrite)) != bytesToWrite)
-	{
-		fprintf(stderr, "Failed to set Trill's mode.\n");
-		fprintf(stderr, "%d\n", writtenValue);
-		return 1;
-	}
-	preparedForDataRead_ = false;
-	mode_ = mode;
-	usleep(commandSleepTime); // need to give enough time to process command
+void Trill::setVerbose(int verbose)
+{
+	this->verbose = verbose;
+}
 
+int Trill::setMode(Mode mode) {
+	if(AUTO == mode)
+		mode = trillDefaults.at(device_type_).mode;
+	i2c_char_t buf[] = { kCommandMode, (i2c_char_t)mode };
+	if(WRITE_COMMAND_BUF(buf))
+		return 1;
+	mode_ = mode;
 	return 0;
 }
 
 int Trill::setScanSettings(uint8_t speed, uint8_t num_bits) {
-	ssize_t bytesToWrite = 4;
 	if(speed > 3)
 		speed = 3;
 	if(num_bits < 9)
 		num_bits = 9;
 	if(num_bits > 16)
 		num_bits = 16;
-	char buf[4] = { kOffsetCommand, kCommandScanSettings, speed, num_bits };
-	preparedForDataRead_ = false;
-	if(int writtenValue = (writeBytes(buf, bytesToWrite)) != bytesToWrite)
-	{
-		fprintf(stderr, "Failed to set Trill's scan settings.\n");
-		fprintf(stderr, "%d\n", writtenValue);
+	i2c_char_t buf[] = { kCommandScanSettings, speed, num_bits };
+	if(WRITE_COMMAND_BUF(buf))
 		return 1;
-	}
-	usleep(commandSleepTime); // need to give enough time to process command
 	numBits = num_bits;
 	updateRescale();
-
 	return 0;
 }
 
 int Trill::setPrescaler(uint8_t prescaler) {
-	ssize_t bytesToWrite = 3;
-	char buf[3] = { kOffsetCommand, kCommandPrescaler, prescaler };
-	if(int writtenValue = (writeBytes(buf, bytesToWrite)) != bytesToWrite)
-	{
-		fprintf(stderr, "Failed to set Trill's prescaler.\n");
-		fprintf(stderr, "%d\n", writtenValue);
-		return 1;
-	}
-	preparedForDataRead_ = false;
-	usleep(commandSleepTime); // need to give enough time to process command
-
-	return 0;
+	i2c_char_t buf[] = { kCommandPrescaler, prescaler };
+	return WRITE_COMMAND_BUF(buf);
 }
 
 int Trill::setNoiseThreshold(float threshold) {
-	ssize_t bytesToWrite = 3;
 	threshold = threshold * (1 << numBits);
 	if(threshold > 255)
 		threshold = 255;
 	if(threshold < 0)
 		threshold = 0;
-	char thByte = char(threshold + 0.5);
-	char buf[3] = { kOffsetCommand, kCommandNoiseThreshold, thByte };
-	if(int writtenValue = (writeBytes(buf, bytesToWrite)) != bytesToWrite)
-	{
-		fprintf(stderr, "Failed to set Trill's threshold.\n");
-		fprintf(stderr, "%d\n", writtenValue);
-		return 1;
-	}
-	preparedForDataRead_ = false;
-	usleep(commandSleepTime); // need to give enough time to process command
-
-	return 0;
+	i2c_char_t thByte = i2c_char_t(threshold + 0.5);
+	i2c_char_t buf[] = { kCommandNoiseThreshold, thByte };
+	return WRITE_COMMAND_BUF(buf);
 }
 
 
 int Trill::setIDACValue(uint8_t value) {
-	ssize_t bytesToWrite = 3;
-	char buf[3] = { kOffsetCommand, kCommandIdac, value };
-	if(int writtenValue = (writeBytes(buf, bytesToWrite)) != bytesToWrite)
-	{
-		fprintf(stderr, "Failed to set Trill's IDAC value.\n");
-		fprintf(stderr, "%d\n", writtenValue);
-		return 1;
-	}
-	preparedForDataRead_ = false;
-	usleep(commandSleepTime); // need to give enough time to process command
-
-	return 0;
+	i2c_char_t buf[] = { kCommandIdac, value };
+	return WRITE_COMMAND_BUF(buf);
 }
 
 int Trill::setMinimumTouchSize(float minSize) {
-	ssize_t bytesToWrite = 4;
 	uint16_t size;
 	float maxMinSize = (1<<16) - 1;
 	if(maxMinSize > minSize / sizeRescale) // clipping to the max value we can transmit
 		size = maxMinSize;
 	else
 		size = minSize / sizeRescale;
-	char buf[4] = { kOffsetCommand, kCommandMinimumSize, (char)(size >> 8), (char)(size & 0xFF) };
-	if(int writtenValue = (writeBytes(buf, bytesToWrite)) != bytesToWrite)
-	{
-		fprintf(stderr, "Failed to set Trill's minimum touch size value.\n");
-		fprintf(stderr, "%d\n", writtenValue);
-		return 1;
-	}
-	preparedForDataRead_ = false;
-	usleep(commandSleepTime); // need to give enough time to process command
-
-	return 0;
+	i2c_char_t buf[] = { kCommandMinimumSize, (i2c_char_t)(size >> 8), (i2c_char_t)(size & 0xFF) };
+	return WRITE_COMMAND_BUF(buf);
 }
 
 int Trill::setAutoScanInterval(uint16_t interval) {
-	ssize_t bytesToWrite = 4;
-	char buf[4] = { kOffsetCommand, kCommandAutoScanInterval, (char)(interval >> 8), (char)(interval & 0xFF) };
-	if(int writtenValue = (writeBytes(buf, bytesToWrite)) != bytesToWrite)
-	{
-		fprintf(stderr, "Failed to set Trill's auto scan interval.\n");
-		fprintf(stderr, "%d\n", writtenValue);
-		return 1;
-	}
-	preparedForDataRead_ = false;
-	usleep(commandSleepTime); // need to give enough time to process command
+	return setScanTrigger(interval);
+}
 
+int Trill::setScanTrigger(uint16_t arg) {
+	i2c_char_t buf[] = { kCommandScanTrigger, (i2c_char_t)(arg >> 8), (i2c_char_t)(arg & 0xFF) };
+	return WRITE_COMMAND_BUF(buf);
+}
+
+int Trill::setEventMode(EventMode mode) {
+	REQUIRE_FW_AT_LEAST(3);
+	i2c_char_t buf[] = { kCommandEventMode, i2c_char_t(mode) };
+	return WRITE_COMMAND_BUF(buf);
+}
+
+int Trill::setChannelMask(uint32_t mask)
+{
+	REQUIRE_FW_AT_LEAST(3);
+	i2c_char_t* bMask = (i2c_char_t*)&mask;
+	i2c_char_t buf[] = { kCommandChannelMaskLow, bMask[0], bMask[1] };
+	if(WRITE_COMMAND_BUF(buf))
+		return 1;
+	buf[0] = kCommandChannelMaskHigh;
+	buf[1] = bMask[2];
+	buf[2] = bMask[3];
+	if(WRITE_COMMAND_BUF(buf))
+		return 1;
+	updateChannelMask(mask);
+	return 0;
+}
+
+int Trill::setTransmissionFormat(uint8_t width, uint8_t shift)
+{
+	REQUIRE_FW_AT_LEAST(3);
+	i2c_char_t buf[] = { kCommandFormat, width, shift };
+	if(WRITE_COMMAND_BUF(buf))
+		return 1;
+	transmissionWidth = width;
+	transmissionRightShift = shift;
 	return 0;
 }
 
 int Trill::updateBaseline() {
-	ssize_t bytesToWrite = 2;
-	char buf[2] = { kOffsetCommand, kCommandBaselineUpdate };
-	if(int writtenValue = (writeBytes(buf, bytesToWrite)) != bytesToWrite)
-	{
-		fprintf(stderr, "Failed to set Trill's baseline.\n");
-		fprintf(stderr, "%d\n", writtenValue);
-		return 1;
-	}
-	preparedForDataRead_ = false;
-	usleep(commandSleepTime); // need to give enough time to process command
-
-	return 0;
+	return WRITE_COMMAND(kCommandBaselineUpdate);
 }
 
-int Trill::prepareForDataRead() {
-	if(!preparedForDataRead_)
-	{
-		ssize_t bytesToWrite = 1;
-		char buf[1] = { kOffsetData };
-		if(writeBytes(buf, bytesToWrite) != bytesToWrite)
-		{
-			fprintf(stderr, "Failed to prepare Trill data collection\n");
-			return 1;
-		}
-		preparedForDataRead_ = true;
-		usleep(commandSleepTime); // need to give enough time to process command
-	}
-
-	return 0;
+int Trill::reset() {
+	REQUIRE_FW_AT_LEAST(3);
+	return WRITE_COMMAND(kCommandReset);
 }
 
-int Trill::readI2C() {
-	if(NONE == device_type_ || readErrorOccurred)
-		return 1;
-	prepareForDataRead();
-
-	ssize_t bytesToRead = kCentroidLengthDefault;
+static unsigned int bytesFromSlots(size_t numWords, size_t transmissionWidth)
+{
+	switch(transmissionWidth)
+	{
+		default:
+		case 16:
+			return numWords * 2;
+		case 12:
+			return numWords + (numWords + 1) / 2;
+		case 8:
+			return numWords;
+	}
+}
+unsigned int Trill::getBytesToRead(bool includesStatusByte)
+{
+	size_t bytesToRead = kCentroidLengthDefault;
 	if(CENTROID == mode_) {
 		if(device_type_ == SQUARE || device_type_ == HEX)
 			bytesToRead = kCentroidLength2D;
 		if(device_type_ == RING)
 			bytesToRead = kCentroidLengthRing;
 	} else {
-		bytesToRead = kRawLength;
+		bytesToRead = bytesFromSlots(getNumChannels(), transmissionWidth);
 	}
-	errno = 0;
-	ssize_t bytesRead = readBytes(dataBuffer.data(), bytesToRead);
-	if (bytesRead != bytesToRead)
+	bytesToRead += sizeof(TrillStatusByte) * includesStatusByte;
+	return bytesToRead;
+}
+
+int Trill::readI2C(bool shouldReadStatusByte) {
+	if(NONE == device_type_ || readErrorOccurred)
+		return 1;
+	// NOTE: to avoid being too verbose, we do not check for firmware
+	// version here. On fw < 3, shouldReadStatusByte will read one more
+	// byte full of garbage.
+
+	ssize_t bytesToRead = getBytesToRead(shouldReadStatusByte);
+	dataBuffer.resize(bytesToRead);
+	i2c_char_t offset = shouldReadStatusByte ? kOffsetStatusByte : kOffsetChannelData;
+	if(READ_BYTES_FROM(offset, dataBuffer.data(), dataBuffer.size()))
 	{
 		num_touches_ = 0;
-		fprintf(stderr, "Trill: error while reading from device %s at address %#x (%d): %d of %d bytes read (error: %d %s)\n",
-			getNameFromDevice(device_type_).c_str(), address, address, bytesRead, bytesToRead, errno, strerror(errno));
+		fprintf(stderr, "Trill: error while reading from device %s at address %#x (%d)\n",
+			getNameFromDevice(device_type_).c_str(), address, address);
 		readErrorOccurred = true;
 		return 1;
 	}
-	parseNewData();
+	parseNewData(shouldReadStatusByte);
 	return 0;
 }
 
-void Trill::newData(const uint8_t* newData, size_t len)
+void Trill::newData(const uint8_t* newData, size_t len, bool includesStatusByte)
 {
+	// we ensure dataBuffer's size is consistent with readI2C(), regardless
+	// of how many bytes are actually passed here.
+	dataBuffer.resize(getBytesToRead(includesStatusByte));
 	memcpy(dataBuffer.data(), newData, std::min(len * sizeof(newData[0]), sizeof(dataBuffer[0]) * dataBuffer.size()));
-	parseNewData();
+	parseNewData(includesStatusByte);
 }
 
-void Trill::parseNewData()
+void Trill::parseNewData(bool includesStatusByte)
 {
+	// by the time this is called, dataBuffer will have been resized appropriately
+	uint8_t* src = this->dataBuffer.data();
+	size_t srcSize = this->dataBuffer.size();
+	if(!srcSize)
+		return;
+	if(includesStatusByte)
+	{
+		processStatusByte(src[0]);
+		src++;
+		srcSize--;
+	}
+	dataBufferIncludesStatusByte = includesStatusByte;
 	if(CENTROID != mode_) {
 		// parse, rescale and copy data to public buffer
-		for (unsigned int i = 0; i < getNumChannels(); ++i)
-			rawData[i] = (((dataBuffer[2 * i] << 8) + dataBuffer[2 * i + 1]) & 0x0FFF) * rawRescale;
+		float rawRescale = this->rawRescale * (1 << transmissionRightShift);
+		switch(transmissionWidth)
+		{
+			default:
+			case 16:
+				for (unsigned int i = 0; i < getNumChannels(); ++i)
+					rawData[i] = ((src[2 * i] << 8) + src[2 * i + 1]) * rawRescale;
+				break;
+			case 12:
+				{
+					uint8_t* p = src;
+					const uint8_t* end = src + srcSize;
+					for (unsigned int i = 0; i < getNumChannels() && p < end; ++i)
+					{
+						uint16_t val;
+						if(i & 1) {
+							val = ((*p++) & 0xf0) << 4;
+							val |= *p++;
+						} else {
+							val = *p++ << 4;
+							val |= (*p & 0xf);
+						}
+						rawData[i] = val * rawRescale;
+					}
+				}
+				break;
+			case 8:
+				for (unsigned int i = 0; i < getNumChannels(); ++i)
+					rawData[i] = src[i] * rawRescale;
+				break;
+		}
 	} else {
 		unsigned int locations = 0;
 		// Look for 1st instance of 0xFFFF (no touch) in the buffer
 		for(locations = 0; locations < MAX_TOUCH_1D_OR_2D; locations++)
 		{
-			if(dataBuffer[2 * locations] == 0xFF && dataBuffer[2 * locations + 1] == 0xFF)
+			if(src[2 * locations] == 0xFF && src[2 * locations + 1] == 0xFF)
 				break;
 		}
 		num_touches_ = locations;
@@ -546,13 +696,50 @@ void Trill::parseNewData()
 			// which might be different from number of vertical touches
 			for(locations = 0; locations < MAX_TOUCH_1D_OR_2D; locations++)
 			{
-				if(dataBuffer[2 * locations + 4 * MAX_TOUCH_1D_OR_2D] == 0xFF
-					&& dataBuffer[2 * locations + 4 * MAX_TOUCH_1D_OR_2D+ 1] == 0xFF)
+				if(src[2 * locations + 4 * MAX_TOUCH_1D_OR_2D] == 0xFF
+					&& src[2 * locations + 4 * MAX_TOUCH_1D_OR_2D+ 1] == 0xFF)
 					break;
 			}
 			num_touches_ |= (locations << 4);
 		}
 	}
+}
+
+void Trill::processStatusByte(uint8_t newStatusByte)
+{
+	statusByte = newStatusByte;
+	uint8_t newFrameId = TrillStatusByte::parse(statusByte).frameId;
+	if(newFrameId < (frameId & 0x3f))
+		frameId += 0x40;
+	frameId = (frameId & 0xffffffc0) | (newFrameId);
+}
+
+int Trill::readStatusByte()
+{
+	REQUIRE_FW_AT_LEAST(3);
+	uint8_t newStatusByte;
+	if(READ_BYTE_FROM(kOffsetStatusByte, newStatusByte))
+		return -1;
+	processStatusByte(newStatusByte);
+	return newStatusByte;
+}
+
+bool Trill::hasReset()
+{
+	return !TrillStatusByte::parse(statusByte).initialised;
+}
+
+bool Trill::hasActivity()
+{
+	return TrillStatusByte::parse(statusByte).activity;
+}
+
+uint8_t Trill::getFrameId() {
+	return TrillStatusByte::parse(statusByte).frameId;
+}
+
+uint32_t Trill::getFrameIdUnwrapped() {
+	return frameId;
 }
 
 bool Trill::is1D()
@@ -600,6 +787,7 @@ unsigned int Trill::getNumHorizontalTouches()
 	// Upper 4 bits hold number of horizontal touches
 	return (num_touches_ >> 4);
 }
+#define dbOffset (dataBufferIncludesStatusByte * sizeof(TrillStatusByte))
 
 float Trill::touchLocation(uint8_t touch_num)
 {
@@ -608,8 +796,8 @@ float Trill::touchLocation(uint8_t touch_num)
 	if(touch_num >= MAX_TOUCH_1D_OR_2D)
 		return -1;
 
-	int location = dataBuffer[2*touch_num] * 256;
-	location += dataBuffer[2*touch_num + 1];
+	int location = dataBuffer[dbOffset + 2 * touch_num] * 256;
+	location += dataBuffer[dbOffset + 2 * touch_num + 1];
 
 	return location * posRescale;
 }
@@ -623,7 +811,10 @@ float Trill::getButtonValue(uint8_t button_num)
 	if(device_type_ != RING)
 		return -1;
 
-	return (((dataBuffer[4*MAX_TOUCH_1D_OR_2D+2*button_num] << 8) + dataBuffer[4*MAX_TOUCH_1D_OR_2D+2*button_num+1]) & 0x0FFF) * rawRescale;
+	return ((
+		(dataBuffer[dbOffset + 4 * MAX_TOUCH_1D_OR_2D + 2 * button_num] << 8)
+		+ dataBuffer[dbOffset + 4 * MAX_TOUCH_1D_OR_2D + 2 * button_num + 1]
+		) & 0x0FFF) * rawRescale;
 }
 
 float Trill::touchSize(uint8_t touch_num)
@@ -633,8 +824,8 @@ float Trill::touchSize(uint8_t touch_num)
 	if(touch_num >= MAX_TOUCH_1D_OR_2D)
 		return -1;
 
-	int size = dataBuffer[2*touch_num + 2*MAX_TOUCH_1D_OR_2D] * 256;
-	size += dataBuffer[2*touch_num + 2*MAX_TOUCH_1D_OR_2D + 1];
+	int size = dataBuffer[dbOffset + 2 * touch_num + 2 * MAX_TOUCH_1D_OR_2D] * 256;
+	size += dataBuffer[dbOffset + 2 * touch_num + 2 * MAX_TOUCH_1D_OR_2D + 1];
 
 	return size * sizeRescale;
 }
@@ -646,8 +837,8 @@ float Trill::touchHorizontalLocation(uint8_t touch_num)
 	if(touch_num >= MAX_TOUCH_1D_OR_2D)
 		return -1;
 
-	int location = dataBuffer[2*touch_num + 4*MAX_TOUCH_1D_OR_2D] * 256;
-	location += dataBuffer[2*touch_num + 4*MAX_TOUCH_1D_OR_2D+ 1];
+	int location = dataBuffer[dbOffset + 2 * touch_num + 4 * MAX_TOUCH_1D_OR_2D] * 256;
+	location += dataBuffer[dbOffset + 2 * touch_num + 4 * MAX_TOUCH_1D_OR_2D+ 1];
 
 	return location * posHRescale;
 }
@@ -659,8 +850,8 @@ float Trill::touchHorizontalSize(uint8_t touch_num)
 	if(touch_num >= MAX_TOUCH_1D_OR_2D)
 		return -1;
 
-	int size = dataBuffer[2*touch_num + 6*MAX_TOUCH_1D_OR_2D] * 256;
-	size += dataBuffer[2*touch_num + 6*MAX_TOUCH_1D_OR_2D+ 1];
+	int size = dataBuffer[dbOffset + 2 * touch_num + 6 * MAX_TOUCH_1D_OR_2D] * 256;
+	size += dataBuffer[dbOffset + 2 * touch_num + 6* MAX_TOUCH_1D_OR_2D + 1];
 
 	return size * sizeRescale;
 }
@@ -696,7 +887,12 @@ float Trill::compoundTouchSize()
 	return size;
 }
 
-unsigned int Trill::getNumChannels()
+unsigned int Trill::getNumChannels() const
+{
+	return numChannels;
+}
+
+unsigned int Trill::getDefaultNumChannels() const
 {
 	switch(device_type_) {
 		case BAR: return kNumChannelsBar;

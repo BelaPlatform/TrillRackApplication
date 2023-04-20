@@ -19,7 +19,6 @@ public:
 	I2c(){};
 	I2c(I2c&&) = delete;
 	int initI2C_RW(int bus, int address, int file = -1);
-	virtual int readI2C() = 0;
 	int closeI2C();
 
 	virtual ~I2c();
