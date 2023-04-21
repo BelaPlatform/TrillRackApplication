@@ -74,6 +74,9 @@ uint8_t gI2cLatestRecv[gI2cDmaRecvSize];
 
 void HAL_I2C_ErrorCallback(I2C_HandleTypeDef *hi2c)
 {
+  // we cannot handle this because we find no way of triggering it
+  // turning off the PSoC, for instance, doesn't trigger this.
+  // We'll leave it on in case we find something that triggers it at some point.
   fprintf(stderr, "HAL_I2C_ErrorCallback. TODO: handle me\n\r");
 }
 
@@ -96,7 +99,9 @@ void HAL_I2C_MasterRxCpltCallback(I2C_HandleTypeDef *hi2c)
 #endif // TRILL_RACK_INTERFACE
   if(tr_scanRequested())
   {
-    HAL_I2C_Master_Receive_DMA(&trillHi2c, gI2cAddress, gI2cDmaRecv, gI2cDmaRecvSize);
+    int ret = HAL_I2C_Master_Receive_DMA(&trillHi2c, gI2cAddress, gI2cDmaRecv, gI2cDmaRecvSize);
+    if (ret)
+      printf("HAL_I2C_Master_Receive_DMA returned %d\n\r", ret);
     gIsScanning = true;
   } else {
     gIsScanning = false;
