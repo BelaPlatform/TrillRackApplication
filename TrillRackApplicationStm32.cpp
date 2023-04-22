@@ -43,6 +43,7 @@ const unsigned int kTimeout = 10;
 
 //#define TOGGLE_DEBUG_PINS
 #define I2C_USE_DMA
+#define I2C_ON_EVT
 #define DAC_USE_DMA
 #define ADC_USE_DMA
 #define GPIO_OUT_USE_DMA
@@ -57,6 +58,20 @@ const unsigned int kTimeout = 10;
 #ifdef I2C_USE_DMA
 static int startScanning();
 
+#ifdef I2C_ON_EVT
+static volatile int gI2cOnEvtEnabled = false; // allows us to defer reading on EVT until we are fully ready
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  if(PSOC_EVENT_Pin == GPIO_Pin)
+  {
+    HAL_GPIO_WritePin(DEBUG0_GPIO_Port, DEBUG0_Pin, GPIO_PIN_SET);
+    if(gI2cOnEvtEnabled)
+      startScanning();
+    HAL_GPIO_WritePin(DEBUG0_GPIO_Port, DEBUG0_Pin, GPIO_PIN_RESET);
+  }
+}
+#endif // I2C_ON_EV
 #define TRILL_USE_CLASS
 
 #ifdef TRILL_USE_CLASS
@@ -100,7 +115,9 @@ void HAL_I2C_MasterRxCpltCallback(I2C_HandleTypeDef *hi2c)
   memcpy(gI2cLatestRecv, gI2cDmaRecv, gI2cDmaRecvSize);
 #endif // TRILL_USE_CLASS
 #endif // TRILL_RACK_INTERFACE
+#ifndef I2C_ON_EVT
   startScanning();
+#endif // I2S_ON_ET
 }
 #endif // I2C_USE_DMA
 
@@ -728,6 +745,10 @@ int TrillRackApplication()
 {
   RetargetInit(&dbgHuart);
   printf("Booted\n\r");
+#ifdef I2C_ON_EVT
+  // do not start reading I2C on EVT yet.
+  HAL_NVIC_DisableIRQ(EXTI3_IRQn);
+#endif // I2C_ON_EVT
   // Calibrate The ADC On Power-Up For Better Accuracy
   HAL_ADCEx_Calibration_Start(&adcHandle, ADC_SINGLE_ENDED);
 
@@ -802,9 +823,15 @@ int TrillRackApplication()
 #endif// TRILL_USE_CLASS
 #endif // TRILL_RACK_INTERFACE
 #ifdef I2C_USE_DMA
+#ifdef I2C_ON_EVT
+  // Start reading I2C on evt
+  gI2cOnEvtEnabled = true;
+  HAL_NVIC_EnableIRQ(EXTI3_IRQn);
+#else // I2C_ON_EVT
   ret = startScanning();
   if(ret)
     return 1;
+#endif // I2C_ON_EVT
 #endif // I2C_USE_DMA
 #ifdef DAC_USE_DMA
   ret = HAL_DAC_Start_DMA(&dac0Handle, dac0Channel, (uint32_t*)gDacOutputs[0], kDoubleBufferSize, DAC_ALIGN_12B_R);
@@ -870,7 +897,9 @@ int TrillRackApplication()
   {
 #ifdef TRILL_RACK_INTERFACE
     tr_mainLoop();
+#ifndef I2C_ON_EVT
     startScanning();
+#endif // I2C_ON_EVT
     // not much to do here ...
 #else // TRILL_RACK_INTERFACE
 #ifdef NEOPIXEL_USE_TIM
