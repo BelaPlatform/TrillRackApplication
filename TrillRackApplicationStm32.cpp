@@ -55,6 +55,8 @@ const unsigned int kTimeout = 10;
 #endif // TRILL_RACK_INTERFACE
 
 #ifdef I2C_USE_DMA
+static int startScanning();
+
 #define TRILL_USE_CLASS
 
 #ifdef TRILL_USE_CLASS
@@ -88,6 +90,7 @@ void HAL_I2C_MasterRxCpltCallback(I2C_HandleTypeDef *hi2c)
 //  for(unsigned int n = 0; n < gI2cDmaRecvSize; n += 2)
 //    printf("%d ", gI2cDmaRecv[n] * 256 + gI2cDmaRecv[n + 1]);
 //  printf("\n\r");
+  gIsScanning = false;
 #ifdef TRILL_RACK_INTERFACE
   tr_newData(gI2cDmaRecv, gI2cDmaRecvSize);
 #else // TRILL_RACK_INTERFACE
@@ -97,15 +100,7 @@ void HAL_I2C_MasterRxCpltCallback(I2C_HandleTypeDef *hi2c)
   memcpy(gI2cLatestRecv, gI2cDmaRecv, gI2cDmaRecvSize);
 #endif // TRILL_USE_CLASS
 #endif // TRILL_RACK_INTERFACE
-  if(tr_scanRequested())
-  {
-    int ret = HAL_I2C_Master_Receive_DMA(&trillHi2c, gI2cAddress, gI2cDmaRecv, gI2cDmaRecvSize);
-    if (ret)
-      printf("HAL_I2C_Master_Receive_DMA returned %d\n\r", ret);
-    gIsScanning = true;
-  } else {
-    gIsScanning = false;
-  }
+  startScanning();
 }
 #endif // I2C_USE_DMA
 
@@ -712,13 +707,18 @@ static void i2cPinsAlt(bool i2c)
 
 static int startScanning()
 {
-  int ret = HAL_I2C_Master_Receive_DMA(&trillHi2c, gI2cAddress, gI2cDmaRecv, gI2cDmaRecvSize);
-  if(HAL_OK != ret)
-  {
-    fprintf(stderr, "I2C_Master_Receive_DMA failed: %d\n", ret);
-    return 1;
+  if(tr_scanRequested()) {
+    if(!gIsScanning) {
+      int ret = HAL_I2C_Master_Receive_DMA(&trillHi2c, gI2cAddress, gI2cDmaRecv, gI2cDmaRecvSize);
+      if(HAL_OK != ret)
+      {
+        fprintf(stderr, "I2C_Master_Receive_DMA failed: %d\n", ret);
+        gIsScanning = false;
+        return 1;
+      }
+      gIsScanning = true;
+    }
   }
-  gIsScanning = 1;
   return 0;
 }
 
@@ -870,8 +870,7 @@ int TrillRackApplication()
   {
 #ifdef TRILL_RACK_INTERFACE
     tr_mainLoop();
-    if(tr_scanRequested() && !gIsScanning)
-      startScanning();
+    startScanning();
     // not much to do here ...
 #else // TRILL_RACK_INTERFACE
 #ifdef NEOPIXEL_USE_TIM
