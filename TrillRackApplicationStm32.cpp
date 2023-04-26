@@ -43,7 +43,8 @@ const unsigned int kTimeout = 10;
 
 //#define TOGGLE_DEBUG_PINS
 #define I2C_USE_DMA
-#define I2C_ON_EVT
+//#define I2C_ON_EVT
+#define I2C_MANUAL 5
 #define DAC_USE_DMA
 #define ADC_USE_DMA
 #define GPIO_OUT_USE_DMA
@@ -56,7 +57,10 @@ const unsigned int kTimeout = 10;
 #endif // TRILL_RACK_INTERFACE
 
 #ifdef I2C_USE_DMA
-static int startScanning();
+#ifndef I2C_MANUAL
+static
+#endif // I2C_MANUAL
+int startScanning();
 
 #ifdef I2C_ON_EVT
 static volatile int gI2cOnEvtEnabled = false; // allows us to defer reading on EVT until we are fully ready
@@ -115,9 +119,9 @@ void HAL_I2C_MasterRxCpltCallback(I2C_HandleTypeDef *hi2c)
   memcpy(gI2cLatestRecv, gI2cDmaRecv, gI2cDmaRecvSize);
 #endif // TRILL_USE_CLASS
 #endif // TRILL_RACK_INTERFACE
-#ifndef I2C_ON_EVT
+#if !(defined(I2C_ON_EVT) || defined(I2C_MANUAL))
   startScanning();
-#endif // I2S_ON_ET
+#endif // I2C_ON_EVT || I2C_MANUAL
 }
 #endif // I2C_USE_DMA
 
@@ -408,6 +412,11 @@ static void processingCallback(uint8_t end)
 #ifdef TOGGLE_DEBUG_PINS
   HAL_GPIO_WritePin(DEBUG0_GPIO_Port, DEBUG0_Pin, GPIO_PIN_SET);
 #endif // TOGGLE_DEBUG_PINS
+#ifdef I2C_MANUAL
+	static unsigned int counter = 0;
+	if((counter++ % I2C_MANUAL) == 0)
+		startScanning();
+#endif
   enum { frames = kDoubleBufferSize / 2 };
   static float analogIn[frames];
   static float analogOut[frames * kDacNumChannels];
@@ -722,7 +731,7 @@ static void i2cPinsAlt(bool i2c)
 		HAL_GPIO_WritePin(PSOC_PULLUP_SDA_GPIO_Port, PSOC_PULLUP_SDA_Pin, GPIO_PIN_SET);
 }
 
-static int startScanning()
+int startScanning()
 {
   if(tr_scanRequested()) {
     if(!gIsScanning) {
@@ -747,8 +756,8 @@ int TrillRackApplication()
   printf("Booted\n\r");
 #ifdef I2C_ON_EVT
   // do not start reading I2C on EVT yet.
-  HAL_NVIC_DisableIRQ(EXTI3_IRQn);
 #endif // I2C_ON_EVT
+  HAL_NVIC_DisableIRQ(EXTI3_IRQn);
   // Calibrate The ADC On Power-Up For Better Accuracy
   HAL_ADCEx_Calibration_Start(&adcHandle, ADC_SINGLE_ENDED);
 
@@ -828,9 +837,11 @@ int TrillRackApplication()
   gI2cOnEvtEnabled = true;
   HAL_NVIC_EnableIRQ(EXTI3_IRQn);
 #else // I2C_ON_EVT
+#ifndef I2C_MANUAL
   ret = startScanning();
   if(ret)
     return 1;
+#endif // !I2C_MANUAL
 #endif // I2C_ON_EVT
 #endif // I2C_USE_DMA
 #ifdef DAC_USE_DMA
@@ -897,7 +908,7 @@ int TrillRackApplication()
   {
 #ifdef TRILL_RACK_INTERFACE
     tr_mainLoop();
-#ifndef I2C_ON_EVT
+#if !(defined(I2C_ON_EVT) || defined(I2C_MANUAL))
     startScanning();
 #endif // I2C_ON_EVT
     // not much to do here ...
