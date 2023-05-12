@@ -748,6 +748,13 @@ int startScanning()
   return 0;
 }
 
+// call this as soon as possible to try and counteract the case where
+// a PSU misbehaves because the LEDs are drawing too much current
+void TrillRackApplication_earlyInit()
+{
+  tr_clearLeds();
+}
+
 extern uint8_t trill_program_start;
 extern uint8_t trill_program_end;
 int TrillRackApplication()
