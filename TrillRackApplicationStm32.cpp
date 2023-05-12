@@ -142,6 +142,7 @@ typedef enum {
   kNumStreams,
 } Stream;
 
+volatile bool gProcessingEnabled;
 static void streamComplete(Stream stream, uint8_t end);
 enum { kDoubleBufferSize = 128 };
 
@@ -392,6 +393,8 @@ static void processingCallback(uint8_t end);
 #if defined(DAC_USE_DMA) || defined(ADC_USE_DMA) || defined(GPIO_OUT_USE_DMA) || defined(GPIO_IN_USE_DMA)
 static void streamComplete(Stream stream, uint8_t end)
 {
+  if(!gProcessingEnabled)
+    return;
   static uint8_t streamStates[kNumStreams];
   streamStates[stream] = end;
   uint8_t ready = 1;
@@ -755,10 +758,32 @@ void TrillRackApplication_earlyInit()
   tr_clearLeds();
 }
 
+static void setDacTo0V()
+{
+  // don't call this before the final MX_DACx_Init() call has been made
+  // (i.e.: cannot go in _earlyInit())
+  gProcessingEnabled = false;
+  for(size_t c = 0; c < kDacNumChannels; ++c)
+  {
+    for(size_t n = 0; n < kDoubleBufferSize; ++n)
+    gDacOutputs[c][n] = 2744; // write approx 0V
+  }
+  HAL_DAC_Start_DMA(&dac0Handle, dac0Channel, (uint32_t*)gDacOutputs[0], kDoubleBufferSize, DAC_ALIGN_12B_R);
+  HAL_DAC_Start_DMA(&dac1Handle, dac1Channel, (uint32_t*)gDacOutputs[1], kDoubleBufferSize, DAC_ALIGN_12B_R);
+  HAL_TIM_Base_Start(&dacAdcHtim);
+  for(volatile unsigned int i = 0; i < 100 * 1000; ++i)
+	; // waste some time, while some samples are written
+  HAL_TIM_Base_Stop(&dacAdcHtim);
+  HAL_DAC_Stop_DMA(&dac0Handle, dac0Channel);
+  HAL_DAC_Stop_DMA(&dac1Handle, dac1Channel);
+}
+
 extern uint8_t trill_program_start;
 extern uint8_t trill_program_end;
 int TrillRackApplication()
 {
+  setDacTo0V();
+  HAL_Delay(10); // wait for any callbacks to complete
   RetargetInit(&dbgHuart);
   printf("Booted\n\r");
 #ifdef I2C_ON_EVT
@@ -904,6 +929,7 @@ int TrillRackApplication()
   }
 #endif // defined(GPIO_OUT_USE_DMA) || defined(GPIO_IN_USE_DMA)
 #if defined(DAC_USE_DMA) || defined (ADC_USE_DMA)
+  gProcessingEnabled = true; // tell the callbacks to do their job
   ret = HAL_TIM_Base_Start(&dacAdcHtim);
   if(HAL_OK != ret)
   {
