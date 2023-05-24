@@ -811,8 +811,10 @@ int TrillRackApplication()
 #ifdef TRILL_RACK_INTERFACE
   int ret = tr_setup();
   printf("tr_setup: %x\n\r", ret);
-  if(ret <= 0)
-    Error_Handler();
+  // if the PSoC doesn't respond, or in case of other error, we'd get ret <= 0
+  // however, we ignore that and keep running, so that the regular behaviour
+  // continues. This allows, e.g.: the factory test mode to display the regular
+  // error messages and allow an operator to validate errors.
   gI2cAddress = ret << 1;
 #else // TRILL_RACK_INTERFACE
 #ifdef NEOPIXEL_USE_CLASS
