@@ -34,7 +34,7 @@ public:
 	DATA_T compoundTouchLocation() const;
 	DATA_T compoundTouchSize() const;
 private:
-	typedef uint16_t WORD;
+	typedef uint32_t WORD;
 	class CalculateCentroids;
 protected:
 	std::vector<DATA_T> centroids;
