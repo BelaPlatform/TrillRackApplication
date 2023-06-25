@@ -10,7 +10,7 @@ public:
 	typedef uint8_t BOOL;
 	WORD* CSD_waSnsDiff;
 	WORD wMinimumCentroidSize = 0;
-	BYTE SLIDER_BITS = 12;
+	BYTE SLIDER_BITS = 16;
 	WORD wAdjacentCentroidNoiseThreshold = 400; // Trough between peaks needed to identify two centroids
 	// calculateCentroids is defined here:
 #include "calculateCentroids.h"
