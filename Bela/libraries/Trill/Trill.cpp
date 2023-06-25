@@ -684,6 +684,11 @@ void Trill::newData(const uint8_t* newData, size_t len, bool includesStatusByte)
 	parseNewData(includesStatusByte);
 }
 
+float Trill::channelIntToFloat(uint16_t in, float rawRescale)
+{
+	return in * rawRescale;
+}
+
 void Trill::parseNewData(bool includesStatusByte)
 {
 	// by the time this is called, dataBuffer will have been resized appropriately
@@ -706,7 +711,9 @@ void Trill::parseNewData(bool includesStatusByte)
 			default:
 			case 16:
 				for (unsigned int i = 0; i < getNumChannels(); ++i)
-					rawData[i] = ((src[2 * i] << 8) + src[2 * i + 1]) * rawRescale;
+				{
+					rawData[i] = channelIntToFloat((src[2 * i] << 8) + src[2 * i + 1], rawRescale);
+				}
 				break;
 			case 12:
 				{
@@ -722,13 +729,13 @@ void Trill::parseNewData(bool includesStatusByte)
 							val = *p++ << 4;
 							val |= (*p & 0xf);
 						}
-						rawData[i] = val * rawRescale;
+						rawData[i] = channelIntToFloat(val, rawRescale);
 					}
 				}
 				break;
 			case 8:
 				for (unsigned int i = 0; i < getNumChannels(); ++i)
-					rawData[i] = src[i] * rawRescale;
+					rawData[i] = channelIntToFloat(src[i], rawRescale);
 				break;
 		}
 	} else {
