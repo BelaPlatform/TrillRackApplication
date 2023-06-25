@@ -503,7 +503,8 @@ int Trill::setNoiseThreshold(float threshold) {
 		threshold = 255;
 	if(threshold < 0)
 		threshold = 0;
-	i2c_char_t thByte = i2c_char_t(threshold + 0.5);
+	noiseThreshold = threshold + 0.5;
+	i2c_char_t thByte = i2c_char_t(noiseThreshold);
 	i2c_char_t buf[] = { kCommandNoiseThreshold, thByte };
 	return WRITE_COMMAND_BUF(buf);
 }
@@ -686,6 +687,9 @@ void Trill::newData(const uint8_t* newData, size_t len, bool includesStatusByte)
 
 float Trill::channelIntToFloat(uint16_t in, float rawRescale)
 {
+	uint16_t thresh = (noiseThreshold >> transmissionRightShift);
+	if(in >= thresh)
+		 in -= thresh;
 	return in * rawRescale;
 }
 

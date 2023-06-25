@@ -95,6 +95,7 @@ class Trill : public I2c
 		int waitForAck(uint8_t command, const char* name);
 		void updateChannelMask(uint32_t mask);
 		float channelIntToFloat(uint16_t in, float rawRescale);
+		uint8_t noiseThreshold = 0;
 		int verbose = 0;
 		uint8_t cmdCounter = 0;
 		bool readErrorOccurred;
