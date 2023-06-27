@@ -774,8 +774,6 @@ static void setDacTo0V()
   for(volatile unsigned int i = 0; i < 100 * 1000; ++i)
 	; // waste some time, while some samples are written
   HAL_TIM_Base_Stop(&dacAdcHtim);
-  HAL_DAC_Stop_DMA(&dac0Handle, dac0Channel);
-  HAL_DAC_Stop_DMA(&dac1Handle, dac1Channel);
 }
 
 extern uint8_t trill_program_start;
@@ -879,12 +877,15 @@ int TrillRackApplication()
 #endif // I2C_ON_EVT
 #endif // I2C_USE_DMA
 #ifdef DAC_USE_DMA
+  // stop DMA as it may have been started in setDacTo0V()
+  HAL_DAC_Stop_DMA(&dac0Handle, dac0Channel);
   ret = HAL_DAC_Start_DMA(&dac0Handle, dac0Channel, (uint32_t*)gDacOutputs[0], kDoubleBufferSize, DAC_ALIGN_12B_R);
   if(HAL_OK != ret)
   {
     fprintf(stderr, "DAC_Start_DMA 0 failed: %d\n", ret);
     return 1;
   }
+  HAL_DAC_Stop_DMA(&dac1Handle, dac1Channel);
   ret = HAL_DAC_Start_DMA(&dac1Handle, dac1Channel, (uint32_t*)gDacOutputs[1], kDoubleBufferSize, DAC_ALIGN_12B_R);
   if(HAL_OK != ret)
   {
