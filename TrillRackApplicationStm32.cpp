@@ -1,7 +1,6 @@
 #include "TrillRackApplicationStm32.h"
 #include <TrillRackApplication_bsp.h>
 #include <main.h>
-#include "retarget.h"
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -782,7 +781,6 @@ int TrillRackApplication()
 {
   setDacTo0V();
   HAL_Delay(10); // wait for any callbacks to complete
-  RetargetInit(&dbgHuart);
   printf("Booted\n\r");
 #ifdef I2C_ON_EVT
   // do not start reading I2C on EVT yet.
