@@ -44,6 +44,6 @@ float Oscillator::process() {
 
 void Oscillator::computePhase(){
 	phase_ += 2.0f * (float)M_PI * frequency_ * invSampleRate_;
-	if(phase_ > M_PI)
+	while(phase_ > M_PI)
 		phase_ -= 2.0f * (float)M_PI;
 }
