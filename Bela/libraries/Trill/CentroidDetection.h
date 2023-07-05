@@ -38,8 +38,8 @@ private:
 	class CalculateCentroids;
 protected:
 	std::vector<DATA_T> centroids;
-private:
 	std::vector<DATA_T> sizes;
+private:
 	std::vector<WORD> centroidBuffer;
 	std::vector<WORD> sizeBuffer;
 	unsigned int maxNumCentroids;

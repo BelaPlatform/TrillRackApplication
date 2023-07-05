@@ -181,5 +181,8 @@ void CentroidDetectionScaled::process(const DATA_T* rawData)
 	CentroidDetection::process(rawData);
 	size_t numTouches = getNumTouches();
 	for(size_t n = 0; n < numTouches; ++n)
+	{
 		centroids[n] = mapAndConstrain(centroids[n], min, max, 0, 1);
+		sizes[n] = std::min(sizes[n], 1.f);
+	}
 }
