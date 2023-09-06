@@ -658,7 +658,13 @@ void HAL_TIM_PWM_PulseFinishedCallback(TIM_HandleTypeDef *htim)
 }
 #endif // NEOPIXEL_USE_TIM
 
+#if __has_include("psoc-programmer-stm32/issp.h")
 #include "psoc-programmer-stm32/issp.h"
+extern uint8_t trill_program_start;
+extern uint8_t trill_program_end;
+#define DO_PSOC_PROGRAMMING
+#endif // has_include
+#ifdef DO_PSOC_PROGRAMMING
 int programTrillHelper(uint8_t* program, size_t size){
 	uint8_t security[16] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 	int result = 0;
@@ -732,6 +738,7 @@ static void i2cPinsAlt(bool i2c)
 	if(i2c)
 		HAL_GPIO_WritePin(PSOC_PULLUP_SDA_GPIO_Port, PSOC_PULLUP_SDA_Pin, GPIO_PIN_SET);
 }
+#endif // DO_PSOC_PROGRAMMING
 
 int startScanning()
 {
@@ -775,8 +782,6 @@ static void setDacTo0V()
   HAL_TIM_Base_Stop(&dacAdcHtim);
 }
 
-extern uint8_t trill_program_start;
-extern uint8_t trill_program_end;
 int TrillRackApplication()
 {
   setDacTo0V();
@@ -789,6 +794,7 @@ int TrillRackApplication()
   // Calibrate The ADC On Power-Up For Better Accuracy
   HAL_ADCEx_Calibration_Start(&adcHandle, ADC_SINGLE_ENDED);
 
+#ifdef DO_PSOC_PROGRAMMING
   // set pins in programming mode
   HAL_GPIO_WritePin(TRILL_3V3_GPIO_Port, TRILL_3V3_Pin, GPIO_PIN_SET);
   i2cPinsAlt(false);
@@ -803,6 +809,7 @@ int TrillRackApplication()
   HAL_Delay(200);
   HAL_GPIO_WritePin(TRILL_3V3_GPIO_Port, TRILL_3V3_Pin, GPIO_PIN_RESET);
   HAL_Delay(250); // wait for device to be receptive to I2C transactions
+#endif // DO_PSOC_PROGRAMMING
 
 #ifdef TRILL_RACK_INTERFACE
   int ret = tr_setup();
