@@ -6,6 +6,7 @@
 #include <math.h>
 #include <assert.h>
 #include "Bela.h"
+#include "../common_stuff/pinManager.h"
 
 const float SAMPLE_RATE = 42500;
 enum {
@@ -713,31 +714,6 @@ int programTrillHelper(uint8_t* program, size_t size){
 		return 6;
 	return checksumRead == checksumWrite ? 0 : 7;
 }
-
-static void i2cPinsAlt(bool i2c)
-{
-	// copied from HAL_I2C_MspInit(), without any of the clocks stuff
-	GPIO_InitTypeDef GPIO_InitStruct = {0};
-	/**I2C2 GPIO Configuration
-	PA8     ------> I2C2_SDA
-	PA9     ------> I2C2_SCL
-	 */
-	GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9;
-	GPIO_InitStruct.Mode = i2c ? GPIO_MODE_AF_OD : GPIO_MODE_OUTPUT_PP;
-	GPIO_InitStruct.Pull = GPIO_NOPULL;
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-	GPIO_InitStruct.Alternate = i2c ? GPIO_AF4_I2C2 : 0;
-	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-	// The SDA pullup should be GPIO in high-Z mode for programming and high output for I2C
-	GPIO_InitStruct.Pin = PSOC_PULLUP_SDA_Pin;
-	GPIO_InitStruct.Mode = i2c ? GPIO_MODE_OUTPUT_PP : GPIO_MODE_INPUT;
-	GPIO_InitStruct.Pull = GPIO_NOPULL;
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-	GPIO_InitStruct.Alternate = 0;
-	HAL_GPIO_Init(PSOC_PULLUP_SDA_GPIO_Port, &GPIO_InitStruct);
-	if(i2c)
-		HAL_GPIO_WritePin(PSOC_PULLUP_SDA_GPIO_Port, PSOC_PULLUP_SDA_Pin, GPIO_PIN_SET);
-}
 #endif // DO_PSOC_PROGRAMMING
 
 int startScanning()
@@ -797,19 +773,19 @@ int TrillRackApplication()
 #ifdef DO_PSOC_PROGRAMMING
   // set pins in programming mode
   HAL_GPIO_WritePin(TRILL_3V3_GPIO_Port, TRILL_3V3_Pin, GPIO_PIN_SET);
-  i2cPinsAlt(false);
+  i2cPinsMode(kI2cPinsModeProgramming);
   uint8_t* program = &trill_program_start;
   size_t programSize = &trill_program_end - &trill_program_start;
   // program Trill
   programTrillHelper(program, programSize);
-  // set pins in I2C mode
-  i2cPinsAlt(true);
-  // powercycle the Trill (via external inverting mosfet)
-  HAL_GPIO_WritePin(TRILL_3V3_GPIO_Port, TRILL_3V3_Pin, GPIO_PIN_SET);
-  HAL_Delay(200);
-  HAL_GPIO_WritePin(TRILL_3V3_GPIO_Port, TRILL_3V3_Pin, GPIO_PIN_RESET);
-  HAL_Delay(250); // wait for device to be receptive to I2C transactions
 #endif // DO_PSOC_PROGRAMMING
+  // set pins in I2C mode
+  i2cPinsMode(kI2cPinsModeI2c);
+  // powercycle the Trill
+  psocPower(false);
+  HAL_Delay(200);
+  psocPower(true);
+  HAL_Delay(250); // wait for device to be receptive to I2C transactions
 
 #ifdef TRILL_RACK_INTERFACE
   int ret = tr_setup();
