@@ -93,14 +93,6 @@ uint8_t gI2cDmaRecv[gI2cDmaRecvSize];
 uint8_t gI2cLatestRecv[gI2cDmaRecvSize];
 #endif // TRILL_RACK_INTERFACE
 
-void HAL_I2C_ErrorCallback(I2C_HandleTypeDef *hi2c)
-{
-  // we cannot handle this because we find no way of triggering it
-  // turning off the PSoC, for instance, doesn't trigger this.
-  // We'll leave it on in case we find something that triggers it at some point.
-  fprintf(stderr, "HAL_I2C_ErrorCallback. TODO: handle me\n\r");
-}
-
 static volatile bool gIsScanning = false;
 // In order for this to be called, the I2C1 EVENT interrupt must be manually enabled in CubeMx.
 // See https://blog.shirtec.com/2019/10/stm32-hal-i2c-itdma-gotcha.html
