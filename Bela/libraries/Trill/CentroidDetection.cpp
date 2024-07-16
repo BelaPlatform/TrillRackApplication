@@ -179,10 +179,26 @@ static inline float mapAndConstrain(float x, float in_min, float in_max, float o
 void CentroidDetectionScaled::process(const DATA_T* rawData)
 {
 	CentroidDetection::process(rawData);
+	scale();
+}
+
+void CentroidDetectionScaled::scale()
+{
 	size_t numTouches = getNumTouches();
 	for(size_t n = 0; n < numTouches; ++n)
 	{
 		centroids[n] = mapAndConstrain(centroids[n], min, max, 0, 1);
 		sizes[n] = std::min(sizes[n], 1.f);
 	}
+}
+
+void CentroidSettableScaled::set(const DATA_T* newCentroids, const DATA_T* newSizes, unsigned int count)
+{
+	num_touches = std::min(count, centroids.size());
+	for(size_t n = 0;  n < num_touches; ++n)
+	{
+		centroids[n] = newCentroids[n];
+		sizes[n] = newSizes[n];
+	}
+	scale();
 }

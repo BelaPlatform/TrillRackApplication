@@ -39,6 +39,7 @@ private:
 protected:
 	std::vector<DATA_T> centroids;
 	std::vector<DATA_T> sizes;
+	unsigned int num_touches;
 private:
 	std::vector<WORD> centroidBuffer;
 	std::vector<WORD> sizeBuffer;
@@ -49,7 +50,6 @@ private:
 	float sizeScale;
 	float locationScale;
 	std::shared_ptr<CalculateCentroids> cc;
-	unsigned int num_touches;
 	DATA_T noiseThreshold;
 };
 
@@ -58,7 +58,17 @@ class CentroidDetectionScaled : public CentroidDetection
 public:
 	void setUsableRange(DATA_T min, DATA_T max);
 	void process(const DATA_T* rawData);
+protected:
+	void scale();
 private:
 	float min = 0;
 	float max = 1;
+};
+
+// this is used when you are already processing touch data externally and only need to scale and access it
+class CentroidSettableScaled : public CentroidDetectionScaled
+{
+public:
+	CentroidSettableScaled() { num_touches = 0; }
+	void set(const DATA_T* locations, const DATA_T* sizes, unsigned int count);
 };
